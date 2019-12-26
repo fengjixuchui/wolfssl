@@ -31,6 +31,10 @@
 #include <string.h>
 #include <wolfssl/ssl.h>
 #include <tests/unit.h>
+#if defined(HAVE_ECC) && defined(FP_ECC) && defined(HAVE_THREAD_LS) \
+                      && (defined(NO_MAIN_DRIVER) || defined(HAVE_STACK_SIZE))
+#include <wolfssl/wolfcrypt/ecc.h>
+#endif
 
 
 #define MAX_ARGS 40
@@ -171,6 +175,10 @@ static int IsValidCert(const char* line)
     size_t i;
     const char* begin;
     char cert[80];
+#ifdef WOLFSSL_STATIC_MEMORY
+    FILE* fStream = NULL;
+    long chkSz = 0;
+#endif
 
     begin = XSTRSTR(line, "-c ");
     if (begin == NULL)
@@ -180,6 +188,24 @@ static int IsValidCert(const char* line)
     for (i = 0; i < sizeof(cert) - 1 && *begin != ' ' && *begin != '\0'; i++)
         cert[i] = *(begin++);
     cert[i] = '\0';
+#ifdef WOLFSSL_STATIC_MEMORY
+    fStream = XFOPEN(cert, "rb");
+    if (fStream == NULL) {
+        printf("Failed to open file %s\n", cert);
+        printf("Invalid cert, skipping test\n");
+        return 0;
+    } else {
+        printf("Successfully opened file\n");
+    }
+
+    XFSEEK(fStream, 0L, SEEK_END);
+    chkSz = XFTELL(fStream);
+    XFCLOSE(fStream);
+    if (chkSz > LARGEST_MEM_BUCKET) {
+        printf("File is larger than largest bucket, skipping this test\n");
+        return 0;
+    }
+#endif
 
     ctx = wolfSSL_CTX_new(wolfSSLv23_server_method_ex(NULL));
     if (ctx == NULL)
@@ -717,6 +743,18 @@ int SuiteTest(int argc, char** argv)
     /* any extra cases will need another argument */
     args.argc = 2;
 
+#ifdef WOLFSSL_OLDTLS_SHA2_CIPHERSUITES
+    /* SHA-2 cipher suites in old TLS versions */
+    strcpy(argv0[1], "tests/test-sha2.conf");
+    printf("starting SHA-2 cipher suite in old TLS versions tests\n");
+    test_harness(&args);
+    if (args.return_code != 0) {
+        printf("error from script %d\n", args.return_code);
+        args.return_code = EXIT_FAILURE;
+        goto exit;
+    }
+#endif
+
 #ifdef WOLFSSL_TLS13
     /* add TLSv13 extra suites */
     strcpy(argv0[1], "tests/test-tls13.conf");
@@ -771,6 +809,17 @@ int SuiteTest(int argc, char** argv)
         args.return_code = EXIT_FAILURE;
         goto exit;
     }
+#ifdef WOLFSSL_OLDTLS_SHA2_CIPHERSUITES
+    /* add dtls extra suites */
+    strcpy(argv0[1], "tests/test-dtls-sha2.conf");
+    printf("starting dtls extra cipher suite tests - old TLS sha-2 cs\n");
+    test_harness(&args);
+    if (args.return_code != 0) {
+        printf("error from script %d\n", args.return_code);
+        args.return_code = EXIT_FAILURE;
+        goto exit;
+    }
+#endif
 #endif
 #ifdef WOLFSSL_SCTP
     /* add dtls-sctp extra suites */
@@ -782,6 +831,17 @@ int SuiteTest(int argc, char** argv)
         args.return_code = EXIT_FAILURE;
         goto exit;
     }
+#ifdef WOLFSSL_OLDTLS_SHA2_CIPHERSUITES
+    /* add dtls-sctp extra suites */
+    strcpy(argv0[1], "tests/test-sctp-sha2.conf");
+    printf("starting dtls-sctp extra cipher suite tests - old TLS sha-2 cs\n");
+    test_harness(&args);
+    if (args.return_code != 0) {
+        printf("error from script %d\n", args.return_code);
+        args.return_code = EXIT_FAILURE;
+        goto exit;
+    }
+#endif
 #endif
 #ifndef WC_STRICT_SIG
 #if !defined(NO_RSA) && defined(HAVE_ECC) /* testing mixed ECC/RSA cert */
@@ -806,6 +866,16 @@ int SuiteTest(int argc, char** argv)
         args.return_code = EXIT_FAILURE;
         goto exit;
     }
+#ifdef WOLFSSL_OLDTLS_SHA2_CIPHERSUITES
+    strcpy(argv0[1], "tests/test-qsh-sha2.conf");
+    printf("starting qsh extra cipher suite tests - old TLS sha-2 cs\n");
+    test_harness(&args);
+    if (args.return_code != 0) {
+        printf("error from script %d\n", args.return_code);
+        args.return_code = EXIT_FAILURE;
+        goto exit;
+    }
+#endif
 #endif
 #ifndef NO_PSK
     #ifndef WOLFSSL_NO_TLS12
@@ -833,7 +903,8 @@ int SuiteTest(int argc, char** argv)
     }
     #endif
 #endif
-#if defined(WOLFSSL_ENCRYPTED_KEYS) && !defined(NO_DES3)
+#if defined(WOLFSSL_ENCRYPTED_KEYS) && !defined(NO_DES3) && !defined(NO_MD5) &&\
+    !defined(NO_SHA)
     /* test encrypted keys */
     strcpy(argv0[1], "tests/test-enckeys.conf");
     printf("starting encrypted keys extra cipher suite tests\n");
@@ -932,6 +1003,10 @@ exit:
     wolfSSL_CTX_free(cipherSuiteCtx);
     wolfSSL_Cleanup();
 
+#if defined(HAVE_ECC) && defined(FP_ECC) && defined(HAVE_THREAD_LS) \
+                      && (defined(NO_MAIN_DRIVER) || defined(HAVE_STACK_SIZE))
+    wc_ecc_fp_free();  /* free per thread cache */
+#endif
 #ifdef WOLFSSL_ASYNC_CRYPT
     wolfAsync_DevClose(&devId);
 #endif

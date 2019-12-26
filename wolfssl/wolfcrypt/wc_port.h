@@ -42,6 +42,20 @@
     #endif
 #endif
 
+
+/* GENERIC INCLUDE SECTION */
+#if defined(FREESCALE_MQX) || defined(FREESCALE_KSDK_MQX)
+    #include <mqx.h>
+    #if (defined(MQX_USE_IO_OLD) && MQX_USE_IO_OLD) || \
+        defined(FREESCALE_MQX_5_0)
+        #include <fio.h>
+    #else
+        #include <nio.h>
+    #endif
+#endif
+
+
+/* THREADING/MUTEX SECTION */
 #ifdef USE_WINDOWS_API
     #ifdef WOLFSSL_GAME_BUILD
         #include "system/xtl.h"
@@ -114,12 +128,39 @@
     #ifndef SINGLE_THREADED
         #include <kernel.h>
     #endif
+#elif defined(WOLFSSL_TELIT_M2MB)
+
+    /* Telit SDK uses C++ compile option (--cpp), which causes link issue
+        to API's if wrapped in extern "C" */
+    #ifdef __cplusplus
+        }  /* extern "C" */
+    #endif
+
+    #include "m2mb_types.h"
+    #include "m2mb_os_types.h"
+    #include "m2mb_os_api.h"
+    #include "m2mb_os.h"
+    #include "m2mb_os_mtx.h"
+    #ifndef NO_ASN_TIME
+    #include "m2mb_rtc.h"
+    #endif
+    #ifndef NO_FILESYSTEM
+    #include "m2mb_fs_posix.h"
+    #endif
+
+    #undef kB /* eliminate conflict in asn.h */
+
+    #ifdef __cplusplus
+        extern "C" {
+    #endif
+
 #else
     #ifndef SINGLE_THREADED
         #define WOLFSSL_PTHREADS
         #include <pthread.h>
     #endif
-    #if defined(OPENSSL_EXTRA) || defined(GOAHEAD_WS)
+    #if (defined(OPENSSL_EXTRA) || defined(GOAHEAD_WS)) && \
+        !defined(NO_FILESYSTEM)
         #include <unistd.h>      /* for close of BIO */
     #endif
 #endif
@@ -195,13 +236,16 @@
         typedef NU_SEMAPHORE wolfSSL_Mutex;
     #elif defined(WOLFSSL_ZEPHYR)
         typedef struct k_mutex wolfSSL_Mutex;
+    #elif defined(WOLFSSL_TELIT_M2MB)
+        typedef M2MB_OS_MTX_HANDLE wolfSSL_Mutex;
     #else
         #error Need a mutex type in multithreaded mode
     #endif /* USE_WINDOWS_API */
 #endif /* SINGLE_THREADED */
 
-/* Enable crypt HW mutex for Freescale MMCAU or PIC32MZ */
-#if defined(FREESCALE_MMCAU) || defined(WOLFSSL_MICROCHIP_PIC32MZ)
+/* Enable crypt HW mutex for Freescale MMCAU, PIC32MZ or STM32 */
+#if defined(FREESCALE_MMCAU) || defined(WOLFSSL_MICROCHIP_PIC32MZ) || \
+    defined(STM32_CRYPTO)
     #ifndef WOLFSSL_CRYPT_HW_MUTEX
         #define WOLFSSL_CRYPT_HW_MUTEX  1
     #endif
@@ -233,7 +277,7 @@ WOLFSSL_API int wc_FreeMutex(wolfSSL_Mutex*);
 WOLFSSL_API int wc_LockMutex(wolfSSL_Mutex*);
 WOLFSSL_API int wc_UnLockMutex(wolfSSL_Mutex*);
 #if defined(OPENSSL_EXTRA) || defined(HAVE_WEBSERVER)
-/* dynamiclly set which mutex to use. unlock / lock is controlled by flag */
+/* dynamically set which mutex to use. unlock / lock is controlled by flag */
 typedef void (mutex_cb)(int flag, int type, const char* file, int line);
 
 WOLFSSL_API int wc_LockMutex_ex(int flag, int type, const char* file, int line);
@@ -244,6 +288,8 @@ WOLFSSL_API int wc_SetMutexCb(mutex_cb* cb);
 WOLFSSL_API int wolfCrypt_Init(void);
 WOLFSSL_API int wolfCrypt_Cleanup(void);
 
+
+/* FILESYSTEM SECTION */
 /* filesystem abstraction layer, used by ssl.c */
 #ifndef NO_FILESYSTEM
 
@@ -251,9 +297,12 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
     #include "vfapi.h"
     #include "vfile.h"
 
+    int ebsnet_fseek(int a, long b, int c); /* Not prototyped in vfile.h per
+                                             * EBSnet feedback */
+
     #define XFILE                    int
     #define XFOPEN(NAME, MODE)       vf_open((const char *)NAME, VO_RDONLY, 0);
-    #define XFSEEK                   vf_lseek
+    #define XFSEEK                   ebsnet_fseek
     #define XFTELL                   vf_tell
     #define XREWIND                  vf_rewind
     #define XFREAD(BUF, SZ, AMT, FD) vf_read(FD, BUF, SZ*AMT)
@@ -352,6 +401,19 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
     #define XBADFILE            NULL
     #define XFGETS(b,s,f)       -2 /* Not ported yet */
 
+#elif defined(WOLFSSL_TELIT_M2MB)
+    #define XFILE                    INT32
+    #define XFOPEN(NAME, MODE)       m2mb_fs_open((NAME), 0, (MODE))
+    #define XFSEEK(F, O, W)          m2mb_fs_lseek((F), (O), (W))
+    #define XFTELL(F)                m2mb_fs_lseek((F), 0, M2MB_SEEK_END)
+    #define XREWIND(F)               (void)F
+    #define XFREAD(BUF, SZ, AMT, F)  m2mb_fs_read((F), (BUF), (SZ)*(AMT))
+    #define XFWRITE(BUF, SZ, AMT, F) m2mb_fs_write((F), (BUF), (SZ)*(AMT))
+    #define XFCLOSE                  m2mb_fs_close
+    #define XSEEK_END                M2MB_SEEK_END
+    #define XBADFILE                 -1
+    #define XFGETS(b,s,f)            -2 /* Not ported yet */
+
 #elif defined(WOLFSSL_USER_FILESYSTEM)
     /* To be defined in user_settings.h */
 #else
@@ -400,6 +462,11 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
         struct fs_dir_t  dir;
         struct fs_dirent s;
         struct fs_dir_t* dirp;
+
+    #elif defined(WOLFSSL_TELIT_M2MB)
+        M2MB_DIR_T* dir;
+        struct M2MB_DIRENT* entry;
+        struct M2MB_STAT s;
     #else
         struct dirent* entry;
         DIR*   dir;
@@ -417,6 +484,8 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
 
 #endif /* !NO_FILESYSTEM */
 
+
+/* MIN/MAX MACRO SECTION */
 /* Windows API defines its own min() macro. */
 #if defined(USE_WINDOWS_API)
     #if defined(min) || defined(WOLFSSL_MYSQL_COMPATIBLE)
@@ -427,6 +496,8 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
     #endif /* max */
 #endif /* USE_WINDOWS_API */
 
+
+/* TIME SECTION */
 /* Time functions */
 #ifndef NO_ASN_TIME
 #if defined(USER_TIME)
@@ -455,6 +526,10 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
         #define USE_WOLF_TM
     #endif
     #define NEED_TMP_TIME
+
+#elif defined(WOLFSSL_XILINX) && defined(FREERTOS)
+    #define USER_TIME
+    #include <time.h>
 
 #elif defined(HAVE_RTP_SYS)
     #include "os.h"           /* dc_rtc_api needs    */
@@ -546,6 +621,22 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
 
     #define USE_WOLF_TM
 
+#elif defined(WOLFSSL_TELIT_M2MB)
+    typedef long time_t;
+    extern time_t m2mb_xtime(time_t * timer);
+    #define XTIME(tl)       m2mb_xtime((tl))
+    #ifdef WOLFSSL_TLS13
+        extern time_t m2mb_xtime_ms(time_t * timer);
+        #define XTIME_MS(tl)    m2mb_xtime_ms((tl))
+    #endif
+    #ifndef NO_CRYPT_BENCHMARK
+        extern double m2mb_xtime_bench(int reset);
+        #define WOLFSSL_CURRTIME_REMAP m2mb_xtime_bench
+    #endif
+    #define XGMTIME(c, t)   gmtime((c))
+    #define WOLFSSL_GMTIME
+    #define USE_WOLF_TM
+
 #else
     /* default */
     /* uses complete <time.h> facility */
@@ -576,7 +667,11 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
 
 /* Map default time functions */
 #if !defined(XTIME) && !defined(TIME_OVERRIDES) && !defined(USER_TIME)
+    #ifdef TEST_BEFORE_DATE
+    #define XTIME(tl)       (946681200UL) /* Jan 1, 2000 */
+    #else
     #define XTIME(tl)       time((tl))
+    #endif
 #endif
 #if !defined(XGMTIME) && !defined(TIME_OVERRIDES)
     #if defined(WOLFSSL_GMTIME) || !defined(HAVE_GMTIME_R) || defined(WOLF_C99)
@@ -641,6 +736,7 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
 #endif
 #endif /* NO_ASN_TIME */
 
+
 #ifndef WOLFSSL_LEANPSK
     char* mystrnstr(const char* s1, const char* s2, unsigned int n);
 #endif
@@ -650,10 +746,17 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
                                     will use dynamic buffer if not big enough */
 #endif
 
+#ifdef HAVE_CAVIUM_OCTEON_SYNC
+    /* By default, the OCTEON's global variables are all thread local. This
+     * tag allows them to be shared between threads. */
+    #include "cvmx-platform.h"
+    #define WOLFSSL_GLOBAL CVMX_SHARED
+#else
+    #define WOLFSSL_GLOBAL
+#endif
 
 #ifdef __cplusplus
     }  /* extern "C" */
 #endif
 
 #endif /* WOLF_CRYPT_PORT_H */
-

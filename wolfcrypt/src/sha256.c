@@ -25,6 +25,24 @@
 
 #include <wolfssl/wolfcrypt/settings.h>
 
+/*
+ * SHA256 Build Options:
+ * USE_SLOW_SHA256:            Reduces code size by not partially unrolling
+                                (~2KB smaller and ~25% slower) (default OFF)
+ * WOLFSSL_SHA256_BY_SPEC:     Uses the Ch/Maj based on SHA256 specification
+                                (default ON)
+ * WOLFSSL_SHA256_ALT_CH_MAJ:  Alternate Ch/Maj that is easier for compilers to
+                                optimize and recognize as SHA256 (default OFF)
+ * SHA256_MANY_REGISTERS:      A SHA256 version that keeps all data in registers
+                                and partial unrolled (default OFF)
+ */
+
+/* Default SHA256 to use Ch/Maj based on specification */
+#if !defined(WOLFSSL_SHA256_BY_SPEC) && !defined(WOLFSSL_SHA256_ALT_CH_MAJ)
+    #define WOLFSSL_SHA256_BY_SPEC
+#endif
+
+
 #if !defined(NO_SHA256) && !defined(WOLFSSL_ARMASM)
 
 #if defined(HAVE_FIPS) && \
@@ -99,6 +117,8 @@
 
 #if defined(WOLFSSL_TI_HASH)
     /* #include <wolfcrypt/src/port/ti/ti-hash.c> included by wc_port.c */
+#elif defined(WOLFSSL_CRYPTOCELL)
+    /* wc_port.c includes wolfcrypt/src/port/arm/cryptoCellHash.c */
 #else
 
 #include <wolfssl/wolfcrypt/logging.h>
@@ -143,7 +163,9 @@
 #if !defined(WOLFSSL_PIC32MZ_HASH) && !defined(STM32_HASH_SHA2) && \
     (!defined(WOLFSSL_IMX6_CAAM) || defined(NO_IMX6_CAAM_HASH)) && \
     !defined(WOLFSSL_AFALG_HASH) && !defined(WOLFSSL_DEVCRYPTO_HASH) && \
-    (!defined(WOLFSSL_ESP32WROOM32_CRYPT) || defined(NO_WOLFSSL_ESP32WROOM32_CRYPT_HASH))
+    (!defined(WOLFSSL_ESP32WROOM32_CRYPT) || defined(NO_WOLFSSL_ESP32WROOM32_CRYPT_HASH)) && \
+    (!defined(WOLFSSL_RENESAS_TSIP_CRYPT) || defined(NO_WOLFSSL_RENESAS_TSIP_HASH))
+
 static int InitSha256(wc_Sha256* sha256)
 {
     int ret = 0;
@@ -164,6 +186,9 @@ static int InitSha256(wc_Sha256* sha256)
     sha256->buffLen = 0;
     sha256->loLen   = 0;
     sha256->hiLen   = 0;
+#if defined(WOLFSSL_HASH_FLAGS) || defined(WOLF_CRYPTO_CB)
+    sha256->flags = 0;
+#endif
 
     return ret;
 }
@@ -233,43 +258,44 @@ static int InitSha256(wc_Sha256* sha256)
      */
 
     /* #if defined(HAVE_INTEL_AVX1/2) at the tail of sha256 */
-    static int Transform_Sha256(wc_Sha256* sha256);
+    static int Transform_Sha256(wc_Sha256* sha256, const byte* data);
 
 #ifdef __cplusplus
     extern "C" {
 #endif
 
     #if defined(HAVE_INTEL_AVX1)
-        extern int Transform_Sha256_AVX1(wc_Sha256 *sha256);
+        extern int Transform_Sha256_AVX1(wc_Sha256 *sha256, const byte* data);
         extern int Transform_Sha256_AVX1_Len(wc_Sha256* sha256,
                                              const byte* data, word32 len);
     #endif
     #if defined(HAVE_INTEL_AVX2)
-        extern int Transform_Sha256_AVX2(wc_Sha256 *sha256);
+        extern int Transform_Sha256_AVX2(wc_Sha256 *sha256, const byte* data);
         extern int Transform_Sha256_AVX2_Len(wc_Sha256* sha256,
                                              const byte* data, word32 len);
         #ifdef HAVE_INTEL_RORX
-        extern int Transform_Sha256_AVX1_RORX(wc_Sha256 *sha256);
+        extern int Transform_Sha256_AVX1_RORX(wc_Sha256 *sha256, const byte* data);
         extern int Transform_Sha256_AVX1_RORX_Len(wc_Sha256* sha256,
                                                   const byte* data, word32 len);
-        extern int Transform_Sha256_AVX2_RORX(wc_Sha256 *sha256);
+        extern int Transform_Sha256_AVX2_RORX(wc_Sha256 *sha256, const byte* data);
         extern int Transform_Sha256_AVX2_RORX_Len(wc_Sha256* sha256,
                                                   const byte* data, word32 len);
-        #endif
-    #endif
+        #endif /* HAVE_INTEL_RORX */
+    #endif /* HAVE_INTEL_AVX2 */
 
 #ifdef __cplusplus
     }  /* extern "C" */
 #endif
 
-    static int (*Transform_Sha256_p)(wc_Sha256* sha256);
+    static int (*Transform_Sha256_p)(wc_Sha256* sha256, const byte* data);
                                                        /* = _Transform_Sha256 */
     static int (*Transform_Sha256_Len_p)(wc_Sha256* sha256, const byte* data,
                                          word32 len);
                                                                     /* = NULL */
     static int transform_check = 0;
     static word32 intel_flags;
-    #define XTRANSFORM(S)            (*Transform_Sha256_p)((S))
+
+    #define XTRANSFORM(S, D)         (*Transform_Sha256_p)((S),(D))
     #define XTRANSFORM_LEN(S, D, L)  (*Transform_Sha256_Len_p)((S),(D),(L))
 
     static void Sha256_SetTransform(void)
@@ -365,8 +391,13 @@ static int InitSha256(wc_Sha256* sha256)
         #include "fsl_mmcau.h"
     #endif
 
-    #define XTRANSFORM(S)            Transform_Sha256((S))
+    #define XTRANSFORM(S, D)         Transform_Sha256((S),(D))
     #define XTRANSFORM_LEN(S, D, L)  Transform_Sha256_Len((S),(D),(L))
+
+    #ifndef WC_HASH_DATA_ALIGNMENT
+        /* these hardware API's require 4 byte (word32) alignment */
+        #define WC_HASH_DATA_ALIGNMENT 4
+    #endif
 
     int wc_InitSha256_ex(wc_Sha256* sha256, void* heap, int devId)
     {
@@ -393,15 +424,52 @@ static int InitSha256(wc_Sha256* sha256)
         return ret;
     }
 
-    static int Transform_Sha256(wc_Sha256* sha256)
+    static int Transform_Sha256(wc_Sha256* sha256, const byte* data)
     {
         int ret = wolfSSL_CryptHwMutexLock();
         if (ret == 0) {
     #ifdef FREESCALE_MMCAU_CLASSIC_SHA
-            cau_sha256_hash_n((byte*)sha256->buffer, 1, sha256->digest);
+            cau_sha256_hash_n((byte*)data, 1, sha256->digest);
     #else
-            MMCAU_SHA256_HashN((byte*)sha256->buffer, 1, sha256->digest);
+            MMCAU_SHA256_HashN((byte*)data, 1, sha256->digest);
     #endif
+            wolfSSL_CryptHwMutexUnLock();
+        }
+        return ret;
+    }
+
+    static int Transform_Sha256_Len(wc_Sha256* sha256, const byte* data,
+        word32 len)
+    {
+        int ret = wolfSSL_CryptHwMutexLock();
+        if (ret == 0) {
+        #if defined(WC_HASH_DATA_ALIGNMENT) && WC_HASH_DATA_ALIGNMENT > 0
+            if ((size_t)data % WC_HASH_DATA_ALIGNMENT) {
+                /* data pointer is NOT aligned,
+                 * so copy and perform one block at a time */
+                byte* local = (byte*)sha256->buffer;
+                while (len >= WC_SHA256_BLOCK_SIZE) {
+                    XMEMCPY(local, data, WC_SHA256_BLOCK_SIZE);
+                #ifdef FREESCALE_MMCAU_CLASSIC_SHA
+                    cau_sha256_hash_n(local, 1, sha256->digest);
+                #else
+                    MMCAU_SHA256_HashN(local, 1, sha256->digest);
+                #endif
+                    data += WC_SHA256_BLOCK_SIZE;
+                    len  -= WC_SHA256_BLOCK_SIZE;
+                }
+            }
+            else
+        #endif
+            {
+    #ifdef FREESCALE_MMCAU_CLASSIC_SHA
+            cau_sha256_hash_n((byte*)data, len/WC_SHA256_BLOCK_SIZE,
+                sha256->digest);
+    #else
+            MMCAU_SHA256_HashN((byte*)data, len/WC_SHA256_BLOCK_SIZE,
+                sha256->digest);
+    #endif
+            }
             wolfSSL_CryptHwMutexUnLock();
         }
         return ret;
@@ -528,6 +596,12 @@ static int InitSha256(wc_Sha256* sha256)
 
         return ret;
     }
+
+#elif defined(WOLFSSL_RENESAS_TSIP_CRYPT) && \
+    !defined(NO_WOLFSSL_RENESAS_TSIP_CRYPT_HASH)
+
+    /* implemented in wolfcrypt/src/port/Renesas/renesas_tsip_sha.c */
+
 #else
     #define NEED_SOFT_SHA256
 
@@ -580,8 +654,17 @@ static int InitSha256(wc_Sha256* sha256)
         0x90BEFFFAL, 0xA4506CEBL, 0xBEF9A3F7L, 0xC67178F2L
     };
 
+/* Both versions of Ch and Maj are logically the same, but with the second set
+    the compilers can recognize them better for optimization */
+#ifdef WOLFSSL_SHA256_BY_SPEC
+    /* SHA256 math based on specification */
     #define Ch(x,y,z)       ((z) ^ ((x) & ((y) ^ (z))))
     #define Maj(x,y,z)      ((((x) | (y)) & (z)) | ((x) & (y)))
+#else
+    /* SHA256 math reworked for easier compiler optimization */
+    #define Ch(x,y,z)       ((((y) ^ (z)) & (x)) ^ (z))
+    #define Maj(x,y,z)      ((((x) ^ (y)) & ((y) ^ (z))) ^ (y))
+#endif
     #define R(x, n)         (((x) & 0xFFFFFFFFU) >> (n))
 
     #define S(x, n)         rotrFixed(x, n)
@@ -599,18 +682,18 @@ static int InitSha256(wc_Sha256* sha256)
     #define g(i) S[(6-i) & 7]
     #define h(i) S[(7-i) & 7]
 
+    #ifndef XTRANSFORM
+         #define XTRANSFORM(S, D)         Transform_Sha256((S),(D))
+    #endif
+
+#ifndef SHA256_MANY_REGISTERS
     #define RND(j) \
          t0 = h(j) + Sigma1(e(j)) + Ch(e(j), f(j), g(j)) + K[i+j] + W[i+j]; \
          t1 = Sigma0(a(j)) + Maj(a(j), b(j), c(j)); \
          d(j) += t0; \
          h(j)  = t0 + t1
 
-    #ifndef XTRANSFORM
-         #define XTRANSFORM(S)            Transform_Sha256((S))
-         #define XTRANSFORM_LEN(S, D, L)  Transform_Sha256_Len((S),(D),(L))
-    #endif
-
-    static int Transform_Sha256(wc_Sha256* sha256)
+    static int Transform_Sha256(wc_Sha256* sha256, const byte* data)
     {
         word32 S[8], t0, t1;
         int i;
@@ -639,7 +722,7 @@ static int InitSha256(wc_Sha256* sha256)
             S[i] = sha256->digest[i];
 
         for (i = 0; i < 16; i++)
-            W[i] = sha256->buffer[i];
+            W[i] = *((word32*)&data[i*sizeof(word32)]);
 
         for (i = 16; i < WC_SHA256_BLOCK_SIZE; i++)
             W[i] = Gamma1(W[i-2]) + W[i-7] + Gamma0(W[i-15]) + W[i-16];
@@ -670,6 +753,69 @@ static int InitSha256(wc_Sha256* sha256)
     #endif
         return 0;
     }
+#else
+    /* SHA256 version that keeps all data in registers */
+    #define SCHED1(j) (W[j] = *((word32*)&data[j*sizeof(word32)]))
+    #define SCHED(j) (               \
+                   W[ j     & 15] += \
+            Gamma1(W[(j-2)  & 15])+  \
+                   W[(j-7)  & 15] +  \
+            Gamma0(W[(j-15) & 15])   \
+        )
+
+    #define RND1(j) \
+         t0 = h(j) + Sigma1(e(j)) + Ch(e(j), f(j), g(j)) + K[i+j] + SCHED1(j); \
+         t1 = Sigma0(a(j)) + Maj(a(j), b(j), c(j)); \
+         d(j) += t0; \
+         h(j)  = t0 + t1
+    #define RNDN(j) \
+         t0 = h(j) + Sigma1(e(j)) + Ch(e(j), f(j), g(j)) + K[i+j] + SCHED(j); \
+         t1 = Sigma0(a(j)) + Maj(a(j), b(j), c(j)); \
+         d(j) += t0; \
+         h(j)  = t0 + t1
+
+    static int Transform_Sha256(wc_Sha256* sha256, const byte* data)
+    {
+        word32 S[8], t0, t1;
+        int i;
+        word32 W[WC_SHA256_BLOCK_SIZE/sizeof(word32)];
+
+        /* Copy digest to working vars */
+        S[0] = sha256->digest[0];
+        S[1] = sha256->digest[1];
+        S[2] = sha256->digest[2];
+        S[3] = sha256->digest[3];
+        S[4] = sha256->digest[4];
+        S[5] = sha256->digest[5];
+        S[6] = sha256->digest[6];
+        S[7] = sha256->digest[7];
+
+        i = 0;
+        RND1( 0); RND1( 1); RND1( 2); RND1( 3);
+        RND1( 4); RND1( 5); RND1( 6); RND1( 7);
+        RND1( 8); RND1( 9); RND1(10); RND1(11);
+        RND1(12); RND1(13); RND1(14); RND1(15);
+        /* 64 operations, partially loop unrolled */
+        for (i = 16; i < 64; i += 16) {
+            RNDN( 0); RNDN( 1); RNDN( 2); RNDN( 3);
+            RNDN( 4); RNDN( 5); RNDN( 6); RNDN( 7);
+            RNDN( 8); RNDN( 9); RNDN(10); RNDN(11);
+            RNDN(12); RNDN(13); RNDN(14); RNDN(15);
+        }
+
+        /* Add the working vars back into digest */
+        sha256->digest[0] += S[0];
+        sha256->digest[1] += S[1];
+        sha256->digest[2] += S[2];
+        sha256->digest[3] += S[3];
+        sha256->digest[4] += S[4];
+        sha256->digest[5] += S[5];
+        sha256->digest[6] += S[6];
+        sha256->digest[7] += S[7];
+
+        return 0;
+    }
+#endif /* SHA256_MANY_REGISTERS */
 #endif
 /* End wc_ software implementation */
 
@@ -679,13 +825,16 @@ static int InitSha256(wc_Sha256* sha256)
     static WC_INLINE void AddLength(wc_Sha256* sha256, word32 len)
     {
         word32 tmp = sha256->loLen;
-        if ((sha256->loLen += len) < tmp)
+        if ((sha256->loLen += len) < tmp) {
             sha256->hiLen++;                       /* carry low to high */
+        }
     }
 
+    /* do block size increments/updates */
     static WC_INLINE int Sha256Update(wc_Sha256* sha256, const byte* data, word32 len)
     {
         int ret = 0;
+        word32 blocksLen;
         byte* local;
 
         if (sha256 == NULL || (data == NULL && len > 0)) {
@@ -697,117 +846,129 @@ static int InitSha256(wc_Sha256* sha256)
             return 0;
         }
 
+        /* check that internal buffLen is valid */
+        if (sha256->buffLen >= WC_SHA256_BLOCK_SIZE) {
+            return BUFFER_E;
+        }
+
+        /* add length for final */
         AddLength(sha256, len);
 
-        /* do block size increments */
         local = (byte*)sha256->buffer;
 
-        /* check that internal buffLen is valid */
-        if (sha256->buffLen >= WC_SHA256_BLOCK_SIZE)
-            return BUFFER_E;
-
+        /* process any remainder from previous operation */
         if (sha256->buffLen > 0) {
-            word32 add = min(len, WC_SHA256_BLOCK_SIZE - sha256->buffLen);
-            XMEMCPY(&local[sha256->buffLen], data, add);
+            blocksLen = min(len, WC_SHA256_BLOCK_SIZE - sha256->buffLen);
+            XMEMCPY(&local[sha256->buffLen], data, blocksLen);
 
-            sha256->buffLen += add;
-            data            += add;
-            len             -= add;
+            sha256->buffLen += blocksLen;
+            data            += blocksLen;
+            len             -= blocksLen;
 
             if (sha256->buffLen == WC_SHA256_BLOCK_SIZE) {
-        #if defined(LITTLE_ENDIAN_ORDER) && !defined(FREESCALE_MMCAU_SHA)
-            #if defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
+            #if defined(LITTLE_ENDIAN_ORDER) && !defined(FREESCALE_MMCAU_SHA)
+                #if defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
                 if (!IS_INTEL_AVX1(intel_flags) && !IS_INTEL_AVX2(intel_flags))
-            #endif
+                #endif
                 {
                     ByteReverseWords(sha256->buffer, sha256->buffer,
-                                                          WC_SHA256_BLOCK_SIZE);
+                        WC_SHA256_BLOCK_SIZE);
                 }
-        #endif
+            #endif
 
-        #if !defined(WOLFSSL_ESP32WROOM32_CRYPT) || \
-            defined(NO_WOLFSSL_ESP32WROOM32_CRYPT_HASH)
-                ret = XTRANSFORM(sha256);
-        #else
-                if(sha256->ctx.mode == ESP32_SHA_INIT) {
+            #if defined(WOLFSSL_ESP32WROOM32_CRYPT) && \
+                !defined(NO_WOLFSSL_ESP32WROOM32_CRYPT_HASH)
+                if (sha256->ctx.mode == ESP32_SHA_INIT){
                     esp_sha_try_hw_lock(&sha256->ctx);
                 }
-                if(sha256->ctx.mode == ESP32_SHA_SW){
-                    ret = XTRANSFORM(sha256);
+                if (sha256->ctx.mode == ESP32_SHA_SW){
+                    ret = XTRANSFORM(sha256, (const byte*)local);
                 } else {
-                    esp_sha256_process(sha256);
+                    esp_sha256_process(sha256, (const byte*)local);
                 }
-        #endif
+            #else
+                ret = XTRANSFORM(sha256, (const byte*)local);
+            #endif
+
                 if (ret == 0)
                     sha256->buffLen = 0;
                 else
-                    len = 0;
+                    len = 0; /* error */
             }
         }
 
-    #if defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
-        if (Transform_Sha256_Len_p != NULL) {
-            word32 blocksLen = len & ~(WC_SHA256_BLOCK_SIZE-1);
+        /* process blocks */
+    #ifdef XTRANSFORM_LEN
+        #if defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
+        if (Transform_Sha256_Len_p != NULL)
+        #endif
+        {
+            /* get number of blocks */
+            /* 64-1 = 0x3F (~ Inverted = 0xFFFFFFC0) */
+            /* len (masked by 0xFFFFFFC0) returns block aligned length */
+            blocksLen = len & ~(WC_SHA256_BLOCK_SIZE-1);
             if (blocksLen > 0) {
-                /* Byte reversal performed in function if required. */
+                /* Byte reversal and alignment handled in function if required */
                 XTRANSFORM_LEN(sha256, data, blocksLen);
                 data += blocksLen;
                 len  -= blocksLen;
             }
         }
+        #if defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
         else
-    #endif
-    #if !defined(LITTLE_ENDIAN_ORDER) || defined(FREESCALE_MMCAU_SHA) || \
-                            defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
+        #endif
+    #endif /* XTRANSFORM_LEN */
+    #if !defined(XTRANSFORM_LEN) || defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
         {
             while (len >= WC_SHA256_BLOCK_SIZE) {
-                XMEMCPY(local, data, WC_SHA256_BLOCK_SIZE);
+                word32* local32 = sha256->buffer;
+                /* optimization to avoid memcpy if data pointer is properly aligned */
+                /* Intel transform function requires use of sha256->buffer */
+                /* Little Endian requires byte swap, so can't use data directly */
+            #if defined(WC_HASH_DATA_ALIGNMENT) && !defined(LITTLE_ENDIAN_ORDER) && \
+                !defined(HAVE_INTEL_AVX1) && !defined(HAVE_INTEL_AVX2)
+                if (((size_t)data % WC_HASH_DATA_ALIGNMENT) == 0) {
+                    local32 = (word32*)data;
+                }
+                else
+            #endif
+                {
+                    XMEMCPY(local32, data, WC_SHA256_BLOCK_SIZE);
+                }
 
                 data += WC_SHA256_BLOCK_SIZE;
                 len  -= WC_SHA256_BLOCK_SIZE;
 
-            #if defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
+            #if defined(LITTLE_ENDIAN_ORDER) && !defined(FREESCALE_MMCAU_SHA)
+                #if defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
                 if (!IS_INTEL_AVX1(intel_flags) && !IS_INTEL_AVX2(intel_flags))
+                #endif
                 {
-                    ByteReverseWords(sha256->buffer, sha256->buffer,
-                                                          WC_SHA256_BLOCK_SIZE);
+                    ByteReverseWords(local32, local32, WC_SHA256_BLOCK_SIZE);
                 }
             #endif
-                ret = XTRANSFORM(sha256);
-                if (ret != 0)
-                    break;
-            }
-        }
-    #else
-        {
-            while (len >= WC_SHA256_BLOCK_SIZE) {
-                XMEMCPY(local, data, WC_SHA256_BLOCK_SIZE);
 
-                data += WC_SHA256_BLOCK_SIZE;
-                len  -= WC_SHA256_BLOCK_SIZE;
-
-                ByteReverseWords(sha256->buffer, sha256->buffer,
-                                                          WC_SHA256_BLOCK_SIZE);
-     #if !defined(WOLFSSL_ESP32WROOM32_CRYPT) || \
-          defined(NO_WOLFSSL_ESP32WROOM32_CRYPT_HASH)
-                ret = XTRANSFORM(sha256);
-    #else
-                if(sha256->ctx.mode == ESP32_SHA_INIT){
+            #if defined(WOLFSSL_ESP32WROOM32_CRYPT) && \
+                !defined(NO_WOLFSSL_ESP32WROOM32_CRYPT_HASH)
+                if (sha256->ctx.mode == ESP32_SHA_INIT){
                     esp_sha_try_hw_lock(&sha256->ctx);
                 }
-
-                if(sha256->ctx.mode == ESP32_SHA_SW){
-                    ret = XTRANSFORM(sha256);
+                if (sha256->ctx.mode == ESP32_SHA_SW){
+                    ret = XTRANSFORM(sha256, (const byte*)local32);
                 } else {
-                    esp_sha256_process(sha256);
+                    esp_sha256_process(sha256, (const byte*)local32);
                 }
-    #endif
+            #else
+                ret = XTRANSFORM(sha256, (const byte*)local32);
+            #endif
+
                 if (ret != 0)
                     break;
             }
         }
     #endif
 
+        /* save remainder */
         if (len > 0) {
             XMEMCPY(local, data, len);
             sha256->buffLen = len;
@@ -850,13 +1011,14 @@ static int InitSha256(wc_Sha256* sha256)
     {
 
         int ret;
-        byte* local = (byte*)sha256->buffer;
+        byte* local;
 
         if (sha256 == NULL) {
             return BAD_FUNC_ARG;
         }
 
-        local[sha256->buffLen++] = 0x80;     /* add 1 */
+        local = (byte*)sha256->buffer;
+        local[sha256->buffLen++] = 0x80; /* add 1 */
 
         /* pad with zeros */
         if (sha256->buffLen > WC_SHA256_PAD_SIZE) {
@@ -864,36 +1026,36 @@ static int InitSha256(wc_Sha256* sha256)
                 WC_SHA256_BLOCK_SIZE - sha256->buffLen);
             sha256->buffLen += WC_SHA256_BLOCK_SIZE - sha256->buffLen;
 
-            {
         #if defined(LITTLE_ENDIAN_ORDER) && !defined(FREESCALE_MMCAU_SHA)
             #if defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
-                if (!IS_INTEL_AVX1(intel_flags) && !IS_INTEL_AVX2(intel_flags))
+            if (!IS_INTEL_AVX1(intel_flags) && !IS_INTEL_AVX2(intel_flags))
             #endif
-                {
-                    ByteReverseWords(sha256->buffer, sha256->buffer,
-                                                          WC_SHA256_BLOCK_SIZE);
-                }
-        #endif
+            {
+                ByteReverseWords(sha256->buffer, sha256->buffer,
+                                                      WC_SHA256_BLOCK_SIZE);
             }
-        #if !defined(WOLFSSL_ESP32WROOM32_CRYPT) || \
-             defined(NO_WOLFSSL_ESP32WROOM32_CRYPT_HASH)
-                ret = XTRANSFORM(sha256);
+        #endif
+
+        #if defined(WOLFSSL_ESP32WROOM32_CRYPT) && \
+             !defined(NO_WOLFSSL_ESP32WROOM32_CRYPT_HASH)
+            if (sha256->ctx.mode == ESP32_SHA_INIT) {
+                esp_sha_try_hw_lock(&sha256->ctx);
+            }
+            if (sha256->ctx.mode == ESP32_SHA_SW) {
+                ret = XTRANSFORM(sha256, (const byte*)local);
+            } else {
+                ret = esp_sha256_process(sha256, (const byte*)local);
+            }
         #else
-                if(sha256->ctx.mode == ESP32_SHA_INIT){
-                    esp_sha_try_hw_lock(&sha256->ctx);
-                }
-                if(sha256->ctx.mode == ESP32_SHA_SW){
-                    ret = XTRANSFORM(sha256);
-                } else {
-                    ret = esp_sha256_process(sha256);
-                }
+            ret = XTRANSFORM(sha256, (const byte*)local);
         #endif
             if (ret != 0)
                 return ret;
 
             sha256->buffLen = 0;
         }
-        XMEMSET(&local[sha256->buffLen], 0, WC_SHA256_PAD_SIZE - sha256->buffLen);
+        XMEMSET(&local[sha256->buffLen], 0,
+            WC_SHA256_PAD_SIZE - sha256->buffLen);
 
         /* put lengths in bits */
         sha256->hiLen = (sha256->loLen >> (8 * sizeof(sha256->loLen) - 3)) +
@@ -903,12 +1065,12 @@ static int InitSha256(wc_Sha256* sha256)
         /* store lengths */
     #if defined(LITTLE_ENDIAN_ORDER) && !defined(FREESCALE_MMCAU_SHA)
         #if defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
-            if (!IS_INTEL_AVX1(intel_flags) && !IS_INTEL_AVX2(intel_flags))
+        if (!IS_INTEL_AVX1(intel_flags) && !IS_INTEL_AVX2(intel_flags))
         #endif
-            {
-                ByteReverseWords(sha256->buffer, sha256->buffer,
-                    WC_SHA256_BLOCK_SIZE);
-            }
+        {
+            ByteReverseWords(sha256->buffer, sha256->buffer,
+                WC_SHA256_BLOCK_SIZE);
+        }
     #endif
         /* ! length ordering dependent on digest endian type ! */
         XMEMCPY(&local[WC_SHA256_PAD_SIZE], &sha256->hiLen, sizeof(word32));
@@ -919,30 +1081,31 @@ static int InitSha256(wc_Sha256* sha256)
         defined(HAVE_INTEL_AVX2)
         /* Kinetis requires only these bytes reversed */
         #if defined(HAVE_INTEL_AVX1) || defined(HAVE_INTEL_AVX2)
-            if (IS_INTEL_AVX1(intel_flags) || IS_INTEL_AVX2(intel_flags))
+        if (IS_INTEL_AVX1(intel_flags) || IS_INTEL_AVX2(intel_flags))
         #endif
-            {
-                ByteReverseWords(
-                    &sha256->buffer[WC_SHA256_PAD_SIZE / sizeof(word32)],
-                    &sha256->buffer[WC_SHA256_PAD_SIZE / sizeof(word32)],
-                    2 * sizeof(word32));
-            }
+        {
+            ByteReverseWords(
+                &sha256->buffer[WC_SHA256_PAD_SIZE / sizeof(word32)],
+                &sha256->buffer[WC_SHA256_PAD_SIZE / sizeof(word32)],
+                2 * sizeof(word32));
+        }
     #endif
 
-    #if !defined(WOLFSSL_ESP32WROOM32_CRYPT) || \
-         defined(NO_WOLFSSL_ESP32WROOM32_CRYPT_HASH)
-            return XTRANSFORM(sha256);
+    #if defined(WOLFSSL_ESP32WROOM32_CRYPT) && \
+         !defined(NO_WOLFSSL_ESP32WROOM32_CRYPT_HASH)
+        if (sha256->ctx.mode == ESP32_SHA_INIT) {
+            esp_sha_try_hw_lock(&sha256->ctx);
+        }
+        if (sha256->ctx.mode == ESP32_SHA_SW) {
+            ret = XTRANSFORM(sha256, (const byte*)local);
+        } else {
+            ret = esp_sha256_digest_process(sha256, 1);
+        }
     #else
-            if(sha256->ctx.mode == ESP32_SHA_INIT){
-                esp_sha_try_hw_lock(&sha256->ctx);
-            }
-            if(sha256->ctx.mode == ESP32_SHA_SW){
-                return XTRANSFORM(sha256);
-            } else {
-                ret = esp_sha256_digest_process(sha256, 1);
-            }
-            return ret;
+        ret = XTRANSFORM(sha256, (const byte*)local);
     #endif
+
+        return ret;
     }
 
     int wc_Sha256FinalRaw(wc_Sha256* sha256, byte* hash)
@@ -1100,6 +1263,9 @@ static int InitSha256(wc_Sha256* sha256)
         /* choose best Transform function under this runtime environment */
         Sha256_SetTransform();
     #endif
+    #if defined(WOLFSSL_HASH_FLAGS) || defined(WOLF_CRYPTO_CB)
+        sha224->flags = 0;
+    #endif
 
         return ret;
     }
@@ -1250,7 +1416,9 @@ void wc_Sha256Free(wc_Sha256* sha256)
     wc_DevCryptoFree(&sha256->ctx);
 #endif /* WOLFSSL_DEVCRYPTO */
 #if (defined(WOLFSSL_AFALG_HASH) && defined(WOLFSSL_AFALG_HASH_KEEP)) || \
-    (defined(WOLFSSL_DEVCRYPTO_HASH) && defined(WOLFSSL_DEVCRYPTO_HASH_KEEP))
+    (defined(WOLFSSL_DEVCRYPTO_HASH) && defined(WOLFSSL_DEVCRYPTO_HASH_KEEP)) || \
+    (defined(WOLFSSL_RENESAS_TSIP_CRYPT) && \
+    !defined(NO_WOLFSSL_RENESAS_TSIP_CRYPT_HASH))
     if (sha256->msg != NULL) {
         XFREE(sha256->msg, sha256->heap, DYNAMIC_TYPE_TMP_BUFFER);
         sha256->msg = NULL;
@@ -1326,6 +1494,10 @@ void wc_Sha256Free(wc_Sha256* sha256)
 #elif defined(WOLFSSL_DEVCRYPTO_HASH)
     /* implemented in wolfcrypt/src/port/devcrypto/devcrypt_hash.c */
 
+#elif defined(WOLFSSL_RENESAS_TSIP_CRYPT) && \
+    !defined(NO_WOLFSSL_RENESAS_TSIP_CRYPT_HASH)
+
+    /* implemented in wolfcrypt/src/port/Renesas/renesas_tsip_sha.c */
 #else
 
 int wc_Sha256GetHash(wc_Sha256* sha256, byte* hash)
@@ -1353,6 +1525,7 @@ int wc_Sha256GetHash(wc_Sha256* sha256, byte* hash)
     !defined(NO_WOLFSSL_ESP32WROOM32_CRYPT_HASH)
         sha256->ctx.mode = ESP32_SHA_SW;
 #endif
+
         wc_Sha256Free(&tmpSha256);
     }
     return ret;
@@ -1387,6 +1560,7 @@ int wc_Sha256Copy(wc_Sha256* src, wc_Sha256* dst)
 
     return ret;
 }
+#endif
 
 #if defined(WOLFSSL_HASH_FLAGS) || defined(WOLF_CRYPTO_CB)
 int wc_Sha256SetFlags(wc_Sha256* sha256, word32 flags)
@@ -1403,8 +1577,6 @@ int wc_Sha256GetFlags(wc_Sha256* sha256, word32* flags)
     }
     return 0;
 }
-#endif
-
 #endif
 #endif /* !WOLFSSL_TI_HASH */
 

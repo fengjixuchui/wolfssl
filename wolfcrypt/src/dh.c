@@ -1244,6 +1244,10 @@ static int GeneratePublicDh(DhKey* key, byte* priv, word32 privSz,
     if (mp_count_bits(&key->p) == 3072)
         return sp_DhExp_3072(&key->g, priv, privSz, &key->p, pub, pubSz);
 #endif
+#ifdef WOLFSSL_SP_4096
+    if (mp_count_bits(&key->p) == 4096)
+        return sp_DhExp_4096(&key->g, priv, privSz, &key->p, pub, pubSz);
+#endif
 #endif
 
 #ifndef WOLFSSL_SP_MATH
@@ -1477,6 +1481,14 @@ int wc_DhCheckPubKey_ex(DhKey* key, const byte* pub, word32 pubSz,
         }
         else
 #endif
+#ifdef WOLFSSL_SP_NO_4096
+        if (mp_count_bits(&key->p) == 4096) {
+            ret = sp_ModExp_4096(y, q, p, y);
+            if (ret != 0)
+                ret = MP_EXPTMOD_E;
+        }
+        else
+#endif
 #endif
 
         {
@@ -1519,6 +1531,46 @@ int wc_DhCheckPubKey_ex(DhKey* key, const byte* pub, word32 pubSz,
 int wc_DhCheckPubKey(DhKey* key, const byte* pub, word32 pubSz)
 {
     return wc_DhCheckPubKey_ex(key, pub, pubSz, NULL, 0);
+}
+
+
+/**
+ * Quick validity check of public key value agaist prime.
+ * Checks are:
+ *   - Public key not 0 or 1
+ *   - Public key not equal to prime or prime - 1
+ *   - Public key not bigger than prime.
+ *
+ * prime    Big-endian encoding of prime in bytes.
+ * primeSz  Size of prime in bytes.
+ * pub      Big-endian encoding of public key in bytes.
+ * pubSz    Size of public key in bytes.
+ */
+int wc_DhCheckPubValue(const byte* prime, word32 primeSz, const byte* pub,
+                       word32 pubSz)
+{
+    int ret = 0;
+    word32 i;
+
+    for (i = 0; i < pubSz && pub[i] == 0; i++) {
+    }
+    pubSz -= i;
+    pub += i;
+
+    if (pubSz == 0 || (pubSz == 1 && pub[0] == 1))
+        ret = MP_VAL;
+    else if (pubSz == primeSz) {
+        for (i = 0; i < pubSz-1 && pub[i] == prime[i]; i++) {
+        }
+        if (i == pubSz-1 && (pub[i] == prime[i] || pub[i] == prime[i] - 1))
+            ret = MP_VAL;
+        else if (pub[i] > prime[i])
+            ret = MP_VAL;
+    }
+    else if (pubSz > primeSz)
+        ret = MP_VAL;
+
+    return ret;
 }
 
 
@@ -1716,6 +1768,14 @@ int wc_DhCheckKeyPair(DhKey* key, const byte* pub, word32 pubSz,
         }
         else
 #endif
+#ifdef WOLFSSL_SP_4096
+        if (mp_count_bits(&key->p) == 4096) {
+            ret = sp_ModExp_4096(&key->g, privateKey, &key->p, checkKey);
+            if (ret != 0)
+                ret = MP_EXPTMOD_E;
+        }
+        else
+#endif
 #endif
         {
 #ifndef WOLFSSL_SP_MATH
@@ -1853,6 +1913,28 @@ static int wc_DhAgree_Sync(DhKey* key, byte* agree, word32* agreeSz,
 
         if (ret == 0)
             ret = sp_DhExp_3072(y, priv, privSz, &key->p, agree, agreeSz);
+
+        mp_clear(y);
+    #ifdef WOLFSSL_SMALL_STACK
+    #ifndef WOLFSSL_SP_MATH
+        XFREE(z, key->heap, DYNAMIC_TYPE_DH);
+        XFREE(x, key->heap, DYNAMIC_TYPE_DH);
+    #endif
+        XFREE(y, key->heap, DYNAMIC_TYPE_DH);
+    #endif
+        return ret;
+    }
+#endif
+#ifdef WOLFSSL_SP_4096
+    if (mp_count_bits(&key->p) == 4096) {
+        if (mp_init(y) != MP_OKAY)
+            return MP_INIT_E;
+
+        if (ret == 0 && mp_read_unsigned_bin(y, otherPub, pubSz) != MP_OKAY)
+            ret = MP_READ_E;
+
+        if (ret == 0)
+            ret = sp_DhExp_4096(y, priv, privSz, &key->p, agree, agreeSz);
 
         mp_clear(y);
     #ifdef WOLFSSL_SMALL_STACK
@@ -2020,7 +2102,6 @@ static int _DhSetKey(DhKey* key, const byte* p, word32 pSz, const byte* g,
             keyP = &key->p;
     }
 
-#ifndef WOLFSSL_SP_MATH
     if (ret == 0 && !trusted) {
         int isPrime = 0;
         if (rng != NULL)
@@ -2031,10 +2112,6 @@ static int _DhSetKey(DhKey* key, const byte* p, word32 pSz, const byte* g,
         if (ret == 0 && isPrime == 0)
             ret = DH_CHECK_PUB_E;
     }
-#else
-    (void)trusted;
-    (void)rng;
-#endif
 
     if (ret == 0 && mp_init(&key->g) != MP_OKAY)
         ret = MP_INIT_E;

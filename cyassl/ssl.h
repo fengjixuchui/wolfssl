@@ -166,6 +166,8 @@
 #define CyaSSL_X509_get_der       wolfSSL_X509_get_der
 #define CyaSSL_X509_notBefore     wolfSSL_X509_notBefore
 #define CyaSSL_X509_notAfter      wolfSSL_X509_notAfter
+#define CyaSSL_X509_get_notBefore wolfSSL_X509_get_notBefore
+#define CyaSSL_X509_get_notAfter  wolfSSL_X509_get_notAfter
 #define CyaSSL_X509_version       wolfSSL_X509_version
 
 #define CyaSSL_cmp_peer_cert_to_file wolfSSL_cmp_peer_cert_to_file

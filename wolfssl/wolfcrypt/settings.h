@@ -79,6 +79,9 @@
 /* Uncomment next line if building wolfSSL for LSR */
 /* #define WOLFSSL_LSR */
 
+/* Uncomment next line if building for Freescale Classic MQX version 5.0 */
+/* #define FREESCALE_MQX_5_0 */
+
 /* Uncomment next line if building for Freescale Classic MQX version 4.0 */
 /* #define FREESCALE_MQX_4_0 */
 
@@ -190,6 +193,15 @@
 /* Uncomment next line if using Espressif ESP32-WROOM-32SE */
 /* #define WOLFSSL_ESPWROOM32SE */
 
+/* Uncomment next line if using ARM CRYPTOCELL*/
+/* #define WOLFSSL_CRYPTOCELL */
+
+/* Uncomment next line if using RENESAS TSIP */
+/* #define WOLFSSL_RENESAS_TSIP */
+
+/* Uncomment next line if using RENESAS RX64N */
+/* #define WOLFSSL_RENESAS_RX65N */
+
 #include <wolfssl/wolfcrypt/visibility.h>
 
 #ifdef WOLFSSL_USER_SETTINGS
@@ -199,7 +211,13 @@
 
 /* make sure old RNG name is used with CTaoCrypt FIPS */
 #ifdef HAVE_FIPS
-    #define WC_RNG RNG
+    #if !defined(HAVE_FIPS_VERSION) || (HAVE_FIPS_VERSION < 2)
+        #define WC_RNG RNG
+    #else
+        #ifndef WOLFSSL_STM32L4
+            #define RNG WC_RNG
+        #endif
+    #endif
     /* blinding adds API not available yet in FIPS mode */
     #undef WC_RSA_BLINDING
 #endif
@@ -256,6 +274,17 @@
 #endif
 #endif /* WOLFSSL_ESPIDF */
 
+#if defined(WOLFSSL_RENESAS_TSIP)
+    #define TSIP_TLS_HMAC_KEY_INDEX_WORDSIZE 64
+    #define TSIP_TLS_MASTERSECRET_SIZE       80   /* 20 words */
+    #define TSIP_TLS_ENCPUBKEY_SZ_BY_CERTVRFY 560 /* in byte  */
+    #if !defined(NO_RENESAS_TSIP_CRYPT) && defined(WOLFSSL_RENESAS_RX65N)
+        #define WOLFSSL_RENESAS_TSIP_CRYPT
+        #define WOLFSSL_RENESAS_TSIP_TLS
+        #define WOLFSSL_RENESAS_TSIP_TLS_AES_CRYPT
+    #endif
+#endif
+
 #if defined(HAVE_LWIP_NATIVE) /* using LwIP native TCP socket */
     #define WOLFSSL_LWIP
     #define NO_WRITEV
@@ -274,7 +303,7 @@
     #define NO_FILESYSTEM
     #define CUSTOM_RAND_TYPE uint16_t
     #define CUSTOM_RAND_GENERATE random_rand
-    static inline unsigned int LowResTimer(void)
+    static inline word32 LowResTimer(void)
     {
         return clock_seconds();
     }
@@ -434,7 +463,15 @@
     #define SINGLE_THREADED
     #define NO_DEV_RANDOM
     #ifndef INTEL_GALILEO /* Galileo has time.h compatibility */
-        #define TIME_OVERRIDES /* must define XTIME and XGMTIME externally */
+        #define TIME_OVERRIDES
+        #ifndef XTIME
+            #error "Must define XTIME externally see porting guide"
+            #error "https://www.wolfssl.com/docs/porting-guide/"
+        #endif
+        #ifndef XGMTIME
+            #error "Must define XGMTIME externally see porting guide"
+            #error "https://www.wolfssl.com/docs/porting-guide/"
+        #endif
     #endif
     #define WOLFSSL_USER_IO
     #define HAVE_ECC
@@ -494,7 +531,8 @@
     #define XSTRNCMP(s1,s2,n)      strncmp((s1),(s2),(n))
     #define XSTRNCAT(s1,s2,n)      strncat((s1),(s2),(n))
     #define XSTRNCASECMP(s1,s2,n)  _strnicmp((s1),(s2),(n))
-    #if defined(WOLFSSL_CERT_EXT) || defined(HAVE_ALPN)
+    #if defined(WOLFSSL_CERT_EXT) || defined(OPENSSL_EXTRA) \
+            || defined(HAVE_ALPN)
         #define XSTRTOK            strtok_r
     #endif
 #endif
@@ -510,9 +548,11 @@
 #ifdef WOLFSSL_RIOT_OS
     #define NO_WRITEV
     #define TFM_NO_ASM
-    #define USE_FAST_MATH
     #define NO_FILESYSTEM
     #define USE_CERT_BUFFERS_2048
+    #if defined(WOLFSSL_GNRC) && !defined(WOLFSSL_DTLS)
+        #define WOLFSSL_DTLS
+    #endif
 #endif
 
 #ifdef WOLFSSL_CHIBIOS
@@ -711,6 +751,11 @@ extern void uITRON4_free(void *p) ;
     #define USE_WOLF_STRTOK /* use with HAVE_ALPN */
     #define HAVE_TLS_EXTENSIONS
     #define HAVE_AESGCM
+    #ifdef WOLFSSL_TI_CRYPT
+        #define NO_GCM_ENCRYPT_EXTRA
+        #define NO_PUBLIC_GCM_SET_IV
+        #define NO_PUBLIC_CCM_SET_NONCE
+    #endif
     #define HAVE_SUPPORTED_CURVES
     #define ALT_ECC_SIZE
 
@@ -748,12 +793,28 @@ extern void uITRON4_free(void *p) ;
         #undef SIZEOF_LONG
         #define SIZEOF_LONG_LONG 8
     #else
-        #sslpro: settings.h - please implement SIZEOF_LONG and SIZEOF_LONG_LONG
+        #error settings.h - please implement SIZEOF_LONG and SIZEOF_LONG_LONG
     #endif
 
     #define XMALLOC(s, h, type) ((void *)rtp_malloc((s), SSL_PRO_MALLOC))
     #define XFREE(p, h, type) (rtp_free(p))
-    #define XREALLOC(p, n, h, t) realloc((p), (n))
+    #define XREALLOC(p, n, h, t) (rtp_realloc((p), (n)))
+
+    #if (WINMSP3)
+        #define XSTRNCASECMP(s1,s2,n)  _strnicmp((s1),(s2),(n))
+    #else
+        #sslpro: settings.h - please implement XSTRNCASECMP - needed for HAVE_ECC
+    #endif
+
+    #define WOLFSSL_HAVE_MAX
+    #define WOLFSSL_HAVE_MIN
+
+    #define USE_FAST_MATH
+    #define TFM_TIMING_RESISTANT
+    #define WC_RSA_BLINDING
+    #define ECC_TIMING_RESISTANT
+
+    #define HAVE_ECC
 
 #endif /* EBSNET */
 
@@ -818,6 +879,11 @@ extern void uITRON4_free(void *p) ;
     #define TFM_TIMING_RESISTANT
 #endif
 
+#ifdef FREESCALE_MQX_5_0
+    /* use normal Freescale MQX port, but with minor changes for 5.0 */
+    #define FREESCALE_MQX
+#endif
+
 #ifdef FREESCALE_MQX_4_0
     /* use normal Freescale MQX port, but with minor changes for 4.0 */
     #define FREESCALE_MQX
@@ -828,7 +894,8 @@ extern void uITRON4_free(void *p) ;
     #include "mqx.h"
     #ifndef NO_FILESYSTEM
         #include "mfs.h"
-        #if MQX_USE_IO_OLD
+        #if (defined(MQX_USE_IO_OLD) && MQX_USE_IO_OLD) || \
+            defined(FREESCALE_MQX_5_0)
             #include "fio.h"
             #define NO_STDIO_FILESYSTEM
         #else
@@ -851,7 +918,8 @@ extern void uITRON4_free(void *p) ;
     #define FREESCALE_COMMON
     #include <mqx.h>
     #ifndef NO_FILESYSTEM
-        #if MQX_USE_IO_OLD
+        #if (defined(MQX_USE_IO_OLD) && MQX_USE_IO_OLD) || \
+            defined(FREESCALE_MQX_5_0)
             #include <fio.h>
         #else
             #include <stdio.h>
@@ -1092,6 +1160,9 @@ extern void uITRON4_free(void *p) ;
     defined(WOLFSSL_STM32L4)
 
     #define SIZEOF_LONG_LONG 8
+    #ifndef CHAR_BIT
+      #define CHAR_BIT 8
+    #endif
     #define NO_DEV_RANDOM
     #define NO_WOLFSSL_DIR
     #undef  NO_RABBIT
@@ -1130,6 +1201,9 @@ extern void uITRON4_free(void *p) ;
             #include "stm32f7xx_hal.h"
         #elif defined(WOLFSSL_STM32F1)
             #include "stm32f1xx_hal.h"
+        #endif
+        #if defined(WOLFSSL_CUBEMX_USE_LL) && defined(WOLFSSL_STM32L4)
+            #include "stm32l4xx_ll_rng.h"
         #endif
 
         #ifndef STM32_HAL_TIMEOUT
@@ -1273,12 +1347,14 @@ extern void uITRON4_free(void *p) ;
                     ((CPU_CHAR *)Str_Cat_N((CPU_CHAR *)(pstr_dest), \
                      (const CPU_CHAR *)(pstr_cat),(CPU_SIZE_T)(len_max)))
     #define XMEMSET(pmem, data_val, size) \
-                    ((void)Mem_Set((void *)(pmem), (CPU_INT08U) (data_val), \
+                    ((void)Mem_Set((void *)(pmem), \
+                    (CPU_INT08U) (data_val), \
                     (CPU_SIZE_T)(size)))
     #define XMEMCPY(pdest, psrc, size) ((void)Mem_Copy((void *)(pdest), \
                      (void *)(psrc), (CPU_SIZE_T)(size)))
     #define XMEMCMP(pmem_1, pmem_2, size) \
-                   (((CPU_BOOLEAN)Mem_Cmp((void *)(pmem_1), (void *)(pmem_2), \
+                   (((CPU_BOOLEAN)Mem_Cmp((void *)(pmem_1), \
+                                          (void *)(pmem_2), \
                      (CPU_SIZE_T)(size))) ? DEF_NO : DEF_YES)
     #define XMEMMOVE XMEMCPY
 
@@ -1294,6 +1370,15 @@ extern void uITRON4_free(void *p) ;
     #endif
 #endif /* MICRIUM */
 
+#ifdef WOLFSSL_MCF5441X
+    #define BIG_ENDIAN_ORDER
+    #ifndef SIZEOF_LONG
+        #define SIZEOF_LONG 4
+    #endif
+    #ifndef SIZEOF_LONG_LONG
+        #define SIZEOF_LONG_LONG 8
+    #endif
+#endif
 
 #ifdef WOLFSSL_QL
     #ifndef WOLFSSL_SEP
@@ -1327,7 +1412,6 @@ extern void uITRON4_free(void *p) ;
 
 
 #if defined(WOLFSSL_XILINX)
-    #define USER_TIME /* XTIME in asn.c */
     #define NO_WOLFSSL_DIR
     #define NO_DEV_RANDOM
     #define HAVE_AESGCM
@@ -1534,12 +1618,6 @@ extern void uITRON4_free(void *p) ;
     #define XGEN_ALIGN
 #endif
 
-#ifdef HAVE_CRL
-    /* not widely supported yet */
-    #undef NO_SKID
-    #define NO_SKID
-#endif
-
 
 #ifdef __INTEL_COMPILER
     #pragma warning(disable:2259) /* explicit casts to smaller sizes, disable */
@@ -1731,11 +1809,17 @@ extern void uITRON4_free(void *p) ;
     #ifndef WOLFSSL_STATIC_RSA
         #define WOLFSSL_STATIC_RSA
     #endif
-    #ifndef WOLFSSL_SESSION_STATS
-        #define WOLFSSL_SESSION_STATS
+    #ifndef WOLFSSL_STATIC_DH
+        #define WOLFSSL_STATIC_DH
     #endif
-    #ifndef WOLFSSL_PEAK_SESSIONS
-        #define WOLFSSL_PEAK_SESSIONS
+    /* Allow option to be disabled. */
+    #ifndef WOLFSSL_NO_SESSION_STATS
+        #ifndef WOLFSSL_SESSION_STATS
+            #define WOLFSSL_SESSION_STATS
+        #endif
+        #ifndef WOLFSSL_PEAK_SESSIONS
+            #define WOLFSSL_PEAK_SESSIONS
+        #endif
     #endif
 #endif
 
@@ -1823,6 +1907,27 @@ extern void uITRON4_free(void *p) ;
         #error PKCS7 requires X963 KDF please define HAVE_X963_KDF
     #endif
 #endif
+
+#ifndef NO_PKCS12
+    #undef  HAVE_PKCS12
+    #define HAVE_PKCS12
+#endif
+
+#ifndef NO_PKCS8
+    #undef  HAVE_PKCS8
+    #define HAVE_PKCS8
+#endif
+
+#if !defined(NO_PBKDF1) || defined(WOLFSSL_ENCRYPTED_KEYS) || defined(HAVE_PKCS8) || defined(HAVE_PKCS12)
+    #undef  HAVE_PBKDF1
+    #define HAVE_PBKDF1
+#endif
+
+#if !defined(NO_PBKDF2) || defined(HAVE_PKCS7) || defined(HAVE_SCRYPT)
+    #undef  HAVE_PBKDF2
+    #define HAVE_PBKDF2
+#endif
+
 
 #if !defined(WOLFCRYPT_ONLY) && !defined(NO_OLD_TLS) && \
         (defined(NO_SHA) || defined(NO_MD5))
@@ -1989,6 +2094,9 @@ extern void uITRON4_free(void *p) ;
     #define WOLF_CRYPTO_CB
 #endif
 
+#if defined(WOLFSSL_TLS13) && defined(WOLFSSL_NO_SIGALG)
+    #error TLS 1.3 requires the Signature Algorithms extension to be enabled
+#endif
 
 #ifdef __cplusplus
     }   /* extern "C" */

@@ -54,6 +54,9 @@
     #include <wolfssl/wolfcrypt/port/atmel/atmel.h>
 #endif /* WOLFSSL_ATECC508A */
 
+#if defined(WOLFSSL_CRYPTOCELL)
+    #include <wolfssl/wolfcrypt/port/arm/cryptoCell.h>
+#endif
 
 #ifdef __cplusplus
     extern "C" {
@@ -105,18 +108,21 @@
     #define MAX_ECC_BYTES     ((MAX_ECC_BITS / 8) + 1)
 #endif
 
+#ifndef ECC_MAX_PAD_SZ
+    /* ECC maximum padding size (when MSB is set extra byte required for R and S) */
+    #define ECC_MAX_PAD_SZ 2
+#endif
 
 enum {
     ECC_PUBLICKEY       = 1,
     ECC_PRIVATEKEY      = 2,
     ECC_PRIVATEKEY_ONLY = 3,
     ECC_MAXNAME     = 16,   /* MAX CURVE NAME LENGTH */
-    SIG_HEADER_SZ   =  6,   /* ECC signature header size */
+    SIG_HEADER_SZ   =  7,   /* ECC signature header size (30 81 87 02 42 [R] 02 42 [S]) */
     ECC_BUFSIZE     = 256,  /* for exported keys temp buffer */
     ECC_MINSIZE     = 20,   /* MIN Private Key size */
     ECC_MAXSIZE     = 66,   /* MAX Private Key size */
     ECC_MAXSIZE_GEN = 74,   /* MAX Buffer size required when generating ECC keys*/
-    ECC_MAX_PAD_SZ  = 4,    /* ECC maximum padding size */
     ECC_MAX_OID_LEN = 16,
     ECC_MAX_SIG_SIZE= ((MAX_ECC_BYTES * 2) + ECC_MAX_PAD_SZ + SIG_HEADER_SZ),
 
@@ -126,6 +132,11 @@ enum {
     ECC_MAX_CRYPTO_HW_PUBKEY_SIZE = (ATECC_KEY_SIZE*2),
 #elif defined(PLUTON_CRYPTO_ECC)
     ECC_MAX_CRYPTO_HW_SIZE = 32,
+#elif defined(WOLFSSL_CRYPTOCELL)
+    #ifndef CRYPTOCELL_KEY_SIZE
+        CRYPTOCELL_KEY_SIZE = ECC_MAXSIZE,
+    #endif
+    ECC_MAX_CRYPTO_HW_SIZE = CRYPTOCELL_KEY_SIZE,
 #endif
 
     /* point compression type */
@@ -376,6 +387,14 @@ struct ecc_key {
     byte id[ECC_MAX_ID_LEN];
     int  idLen;
 #endif
+#if defined(WOLFSSL_CRYPTOCELL)
+    ecc_context_t ctx;
+#endif
+
+#ifdef WOLFSSL_ECDSA_SET_K
+    mp_int *sign_k;
+#endif
+
 #ifdef WOLFSSL_SMALL_STACK_CACHE
     mp_int* t1;
     mp_int* t2;
@@ -386,6 +405,10 @@ struct ecc_key {
 #endif
 #endif
 };
+
+
+WOLFSSL_ABI WOLFSSL_API ecc_key* wc_ecc_key_new(void*);
+WOLFSSL_ABI WOLFSSL_API void wc_ecc_key_free(ecc_key*);
 
 
 /* ECC predefined curve sets  */
@@ -416,9 +439,8 @@ ECC_API int ecc_projective_dbl_point(ecc_point* P, ecc_point* R, mp_int* a,
 
 WOLFSSL_API
 int wc_ecc_make_key(WC_RNG* rng, int keysize, ecc_key* key);
-WOLFSSL_API
-int wc_ecc_make_key_ex(WC_RNG* rng, int keysize, ecc_key* key,
-    int curve_id);
+WOLFSSL_ABI WOLFSSL_API
+int wc_ecc_make_key_ex(WC_RNG* rng, int keysize, ecc_key* key, int curve_id);
 WOLFSSL_API
 int wc_ecc_make_pub(ecc_key* key, ecc_point* pubOut);
 WOLFSSL_API
@@ -436,16 +458,26 @@ int wc_ecc_shared_secret_gen(ecc_key* private_key, ecc_point* point,
 WOLFSSL_API
 int wc_ecc_shared_secret_ex(ecc_key* private_key, ecc_point* point,
                              byte* out, word32 *outlen);
+
+#if defined(WOLFSSL_ATECC508A) || defined(PLUTON_CRYPTO_ECC) || defined(WOLFSSL_CRYPTOCELL)
+#define wc_ecc_shared_secret_ssh wc_ecc_shared_secret
+#else
 #define wc_ecc_shared_secret_ssh wc_ecc_shared_secret_ex /* For backwards compat */
+#endif
+
 #endif /* HAVE_ECC_DHE */
 
 #ifdef HAVE_ECC_SIGN
-WOLFSSL_API
+WOLFSSL_ABI WOLFSSL_API
 int wc_ecc_sign_hash(const byte* in, word32 inlen, byte* out, word32 *outlen,
                      WC_RNG* rng, ecc_key* key);
 WOLFSSL_API
 int wc_ecc_sign_hash_ex(const byte* in, word32 inlen, WC_RNG* rng,
                         ecc_key* key, mp_int *r, mp_int *s);
+#ifdef WOLFSSL_ECDSA_SET_K
+WOLFSSL_API
+int wc_ecc_sign_set_k(const byte* k, word32 klen, ecc_key* key);
+#endif
 #endif /* HAVE_ECC_SIGN */
 
 #ifdef HAVE_ECC_VERIFY
@@ -459,7 +491,7 @@ int wc_ecc_verify_hash_ex(mp_int *r, mp_int *s, const byte* hash,
 
 WOLFSSL_API
 int wc_ecc_init(ecc_key* key);
-WOLFSSL_API
+WOLFSSL_ABI WOLFSSL_API
 int wc_ecc_init_ex(ecc_key* key, void* heap, int devId);
 #ifdef HAVE_PKCS11
 WOLFSSL_API
@@ -470,7 +502,7 @@ int wc_ecc_init_id(ecc_key* key, unsigned char* id, int len, void* heap,
 WOLFSSL_LOCAL
 void wc_ecc_free_curve(const ecc_set_type* curve, void* heap);
 #endif
-WOLFSSL_API
+WOLFSSL_ABI WOLFSSL_API
 int wc_ecc_free(ecc_key* key);
 WOLFSSL_API
 int wc_ecc_set_flags(ecc_key* key, word32 flags);
@@ -501,9 +533,13 @@ int wc_ecc_get_curve_id_from_params(int fieldSize,
         const byte* prime, word32 primeSz, const byte* Af, word32 AfSz,
         const byte* Bf, word32 BfSz, const byte* order, word32 orderSz,
         const byte* Gx, word32 GxSz, const byte* Gy, word32 GySz, int cofactor);
+WOLFSSL_API
+int wc_ecc_get_curve_id_from_dp_params(const ecc_set_type* dp);
 
 WOLFSSL_API
 int wc_ecc_get_curve_id_from_oid(const byte* oid, word32 len);
+
+WOLFSSL_API const ecc_set_type* wc_ecc_get_curve_params(int curve_idx);
 
 WOLFSSL_API
 ecc_point* wc_ecc_new_point(void);
@@ -686,6 +722,8 @@ WOLFSSL_API int wc_ecc_curve_cache_init(void);
 WOLFSSL_API void wc_ecc_curve_cache_free(void);
 #endif
 
+WOLFSSL_API
+int wc_ecc_gen_k(WC_RNG* rng, int size, mp_int* k, mp_int* order);
 
 #ifdef __cplusplus
     }    /* extern "C" */

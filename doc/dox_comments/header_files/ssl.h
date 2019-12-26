@@ -5819,7 +5819,7 @@ WOLFSSL_API const unsigned char* wolfSSL_X509_get_der(WOLFSSL_X509*, int*);
     \brief This function checks to see if x509 is NULL and if it’s not,
     it returns the notAfter member of the x509 struct.
 
-    \return pointer returns a constant byte pointer to the notAfter
+    \return pointer to struct with ASN1_TIME to the notAfter
     member of the x509 struct.
     \return NULL returned if the x509 object is NULL.
 
@@ -5830,15 +5830,15 @@ WOLFSSL_API const unsigned char* wolfSSL_X509_get_der(WOLFSSL_X509*, int*);
     WOLFSSL_X509* x509 = (WOLFSSL_X509)XMALOC(sizeof(WOLFSSL_X509), NULL,
     DYNAMIC_TYPE_X509) ;
     ...
-    byte* notAfter = wolfSSL_X509_notAfter(x509);
+    const WOLFSSL_ASN1_TIME* notAfter = wolfSSL_X509_get_notAfter(x509);
     if(notAfter == NULL){
-	    // Failure case, the x509 object is null.
+        // Failure case, the x509 object is null.
     }
     \endcode
 
-    \sa none
+    \sa wolfSSL_X509_get_notBefore
 */
-WOLFSSL_API const unsigned char* wolfSSL_X509_notAfter(WOLFSSL_X509*);
+WOLFSSL_API WOLFSSL_ASN1_TIME* wolfSSL_X509_get_notAfter(WOLFSSL_X509*);
 
 /*!
     \ingroup CertsKeys
@@ -6122,6 +6122,45 @@ WOLFSSL_API int  wolfSSL_connect_cert(WOLFSSL* ssl);
 */
 WOLFSSL_API WC_PKCS12* wolfSSL_d2i_PKCS12_bio(WOLFSSL_BIO* bio,
                                        WC_PKCS12** pkcs12);
+
+/*!
+    \ingroup openSSL
+
+    \brief wolfSSL_i2d_PKCS12_bio (i2d_PKCS12_bio) copies in the cert
+    information from the structure WC_PKCS12 to WOLFSSL_BIO.
+
+    \return 1 for success.
+    \return Failure 0.
+
+    \param bio WOLFSSL_BIO structure to write PKCS12 buffer to.
+    \param pkcs12 WC_PKCS12 structure for PKCS12 structure as input.
+
+    _Example_
+    \code
+    WC_PKCS12 pkcs12;
+    FILE *f;
+    byte buffer[5300];
+    char file[] = "./test.p12";
+    int bytes;
+    WOLFSSL_BIO* bio;
+    pkcs12 = wc_PKCS12_new();
+    f = fopen(file, "rb");
+    bytes = (int)fread(buffer, 1, sizeof(buffer), f);
+    fclose(f);
+    //convert the DER file into an internal structure
+    wc_d2i_PKCS12(buffer, bytes, pkcs12);
+    bio = wolfSSL_BIO_new(wolfSSL_BIO_s_mem());
+    //convert PKCS12 structure into bio
+    wolfSSL_i2d_PKCS12_bio(bio, pkcs12);
+    wc_PKCS12_free(pkcs)
+    //use bio
+    \endcode
+
+    \sa wolfSSL_PKCS12_parse
+    \sa wc_PKCS12_free
+*/
+WOLFSSL_API WC_PKCS12* wolfSSL_i2d_PKCS12_bio(WOLFSSL_BIO* bio,
+                                       WC_PKCS12* pkcs12);
 
 /*!
     \ingroup openSSL
@@ -11327,6 +11366,33 @@ WOLFSSL_API int wolfSSL_check_private_key(const WOLFSSL* ssl);
 /*!
     \ingroup CertsKeys
 
+    \brief This function looks for and returns the extension index
+    matching the passed in NID value.
+
+    \return >= 0 If successful the extension index is returned.
+    \return -1 If extension is not found or error is encountered.
+
+    \param x509 certificate to get parse through for extension.
+    \param nid extension OID to be found.
+    \param lastPos start search from extension after lastPos.
+                   Set to -1 initially.
+
+    _Example_
+    \code
+    const WOLFSSL_X509* x509;
+    int lastPos = -1;
+    int idx;
+
+    idx = wolfSSL_X509_get_ext_by_NID(x509, NID_basic_constraints, lastPos);
+    \endcode
+
+*/
+WOLFSSL_API int wolfSSL_X509_get_ext_by_NID(const WOLFSSL_X509* x509,
+                                             int nid, int lastPos);
+
+/*!
+    \ingroup CertsKeys
+
     \brief This function looks for and returns the extension
     matching the passed in NID value.
 
@@ -12144,8 +12210,8 @@ WOLFSSL_API char* wolfSSL_X509_get_next_altname(WOLFSSL_X509*);
     \brief The function checks to see if x509 is NULL and if it’s not, it
     returns the notBefore member of the x509 struct.
 
-    \return pointer This function returns a constant byte pointer to the x509’s
-    member notAfter.
+    \return pointer to struct with ASN1_TIME to the notBefore
+        member of the x509 struct.
     \return NULL the function returns NULL if the x509 structure is NULL.
 
     \param x509 a pointer to the WOLFSSL_X509 struct.
@@ -12155,15 +12221,15 @@ WOLFSSL_API char* wolfSSL_X509_get_next_altname(WOLFSSL_X509*);
     WOLFSSL_X509* x509 = (WOLFSSL_X509)XMALLOC(sizeof(WOLFSSL_X509), NULL,
     DYNAMIC_TYPE_X509) ;
     …
-    byte* notAfter = wolfSSL_X509_notAfter(x509);
+    const WOLFSSL_ASN1_TIME* notAfter = wolfSSL_X509_get_notBefore(x509);
     if(notAfter == NULL){
             //The x509 object was NULL
     }
     \endcode
 
-    \sa wolfSSL_X509_notAfter
+    \sa wolfSSL_X509_get_notAfter
 */
-WOLFSSL_API const unsigned char* wolfSSL_X509_notBefore(WOLFSSL_X509*);
+WOLFSSL_API WOLFSSL_ASN1_TIME* wolfSSL_X509_get_notBefore(WOLFSSL_X509*);
 
 /*!
     \ingroup IO

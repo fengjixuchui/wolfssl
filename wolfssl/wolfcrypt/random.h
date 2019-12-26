@@ -156,6 +156,20 @@ struct WC_RNG {
 #ifdef HAVE_HASHDRBG
     /* Hash-based Deterministic Random Bit Generator */
     struct DRBG* drbg;
+#if defined(WOLFSSL_NO_MALLOC) && !defined(WOLFSSL_STATIC_MEMORY)
+    #define DRBG_STRUCT_SZ ((sizeof(word32)*3) + (DRBG_SEED_LEN*2))
+    #ifdef WOLFSSL_SMALL_STACK_CACHE
+        #define DRBG_STRUCT_SZ_SHA256 (sizeof(wc_Sha256))
+    #else
+        #define DRBG_STRUCT_SZ_SHA256 0
+    #endif
+    #if defined(WOLFSSL_ASYNC_CRYPT) || defined(WOLF_CRYPTO_CB)
+        #define DRBG_STRUCT_SZ_ASYNC (sizeof(void*) + sizeof(int))
+    #else
+        #define DRBG_STRUCT_SZ_ASYNC 0
+    #endif
+    byte drbg_data[DRBG_STRUCT_SZ + DRBG_STRUCT_SZ_SHA256 + DRBG_STRUCT_SZ_ASYNC];
+#endif
     byte status;
 #endif
 #ifdef WOLFSSL_ASYNC_CRYPT
@@ -184,6 +198,11 @@ int wc_GenerateSeed(OS_Seed* os, byte* seed, word32 sz);
     WOLFSSL_API int  wc_InitNetRandom(const char*, wnr_hmac_key, int);
     WOLFSSL_API int  wc_FreeNetRandom(void);
 #endif /* HAVE_WNR */
+
+
+WOLFSSL_ABI WOLFSSL_API WC_RNG* wc_rng_new(byte*, word32, void*);
+WOLFSSL_ABI WOLFSSL_API void wc_rng_free(WC_RNG*);
+
 
 #ifndef WC_NO_RNG
 WOLFSSL_API int  wc_InitRng(WC_RNG*);
