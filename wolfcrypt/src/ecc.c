@@ -2943,7 +2943,7 @@ exit:
     R        [out] Destination of product
     a        ECC curve parameter a
     modulus  The modulus for the curve
-    map      [boolean] If non-zero maps the point back to affine co-ordinates,
+    map      [boolean] If non-zero maps the point back to affine coordinates,
              otherwise it's left in jacobian-montgomery form
     return MP_OKAY if successful
 */
@@ -4367,6 +4367,9 @@ int wc_ecc_init_ex(ecc_key* key, void* heap, int devId)
                                                             key->heap, devId);
 #endif
 
+#if defined(WOLFSSL_DSP)
+    key->handle = -1;
+#endif
     return ret;
 }
 
@@ -5807,6 +5810,16 @@ int wc_ecc_verify_hash_ex(mp_int *r, mp_int *s, const byte* hash,
       }
   }
 
+#if defined(WOLFSSL_DSP) && !defined(FREESCALE_LTC_ECC)
+  if (key->handle != -1) {
+      return sp_dsp_ecc_verify_256(key->handle, hash, hashlen, key->pubkey.x, key->pubkey.y,
+                                           key->pubkey.z, r, s, res, key->heap);
+  }
+  if (wolfSSL_GetHandleCbSet() == 1) {
+      return sp_dsp_ecc_verify_256(0, hash, hashlen, key->pubkey.x, key->pubkey.y,
+                                           key->pubkey.z, r, s, res, key->heap);
+  }
+#endif
 #if defined(WOLFSSL_SP_MATH) && !defined(FREESCALE_LTC_ECC)
   if (key->idx != ECC_CUSTOM_IDX && ecc_sets[key->idx].id == ECC_SECP256R1) {
       return sp_ecc_verify_256(hash, hashlen, key->pubkey.x, key->pubkey.y,
@@ -9097,7 +9110,7 @@ int ecc_mul2add(ecc_point* A, mp_int* kA,
     R        [out] Destination of product
     a        ECC curve parameter a
     modulus  The modulus for the curve
-    map      [boolean] If non-zero maps the point back to affine co-ordinates,
+    map      [boolean] If non-zero maps the point back to affine coordinates,
              otherwise it's left in jacobian-montgomery form
     return MP_OKAY if successful
 */

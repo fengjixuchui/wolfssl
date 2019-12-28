@@ -420,7 +420,7 @@ void wolfSSL_CTX_free(WOLFSSL_CTX* ctx)
 
 #ifdef HAVE_ENCRYPT_THEN_MAC
 /**
- * Sets whether Encrypt-Then-MAC extension can be negotitated against context.
+ * Sets whether Encrypt-Then-MAC extension can be negotiated against context.
  * The default value: enabled.
  *
  * ctx  SSL/TLS context.
@@ -434,7 +434,7 @@ int wolfSSL_CTX_AllowEncryptThenMac(WOLFSSL_CTX *ctx, int set)
 }
 
 /**
- * Sets whether Encrypt-Then-MAC extension can be negotitated against context.
+ * Sets whether Encrypt-Then-MAC extension can be negotiated against context.
  * The default value comes from context.
  *
  * ctx  SSL/TLS context.
@@ -5216,6 +5216,9 @@ static int ProcessBufferTryDecode(WOLFSSL_CTX* ctx, WOLFSSL* ssl, DerBuffer* der
 {
     int ret = 0;
 
+    (void)heap;
+    (void)devId;
+
     if (ctx == NULL && ssl == NULL)
         return BAD_FUNC_ARG;
     if (!der || !keySz || !idx || !resetSuites || !rsaKey || !eccKey || !ed25519Key)
@@ -8349,7 +8352,7 @@ WOLFSSL_X509_EXTENSION* wolfSSL_X509_set_ext(WOLFSSL_X509* x509, int loc)
                 if (x509->subjAltNameSet && x509->altNames != NULL) {
                     /* alt names are DNS_entry structs */
                     dns = x509->altNames;
-                    /* Currenlty only support GEN_DNS type */
+                    /* Currently only support GEN_DNS type */
                     while (dns != NULL) {
                         gn = wolfSSL_GENERAL_NAME_new();
                         if (gn == NULL) {
@@ -21201,6 +21204,9 @@ int wolfSSL_X509_cmp(const WOLFSSL_X509 *a, const WOLFSSL_X509 *b)
                         mp_to_unsigned_bin(&rsa.e, rawKey);
                         if ((word32)rawLen <= sizeof(word32)) {
                             idx = *(word32*)rawKey;
+                        #ifdef BIG_ENDIAN_ORDER
+                            idx = ByteReverseWord32(idx);
+                        #endif
                         }
                         XSNPRINTF(tmp, sizeof(tmp) - 1,
                             "\n                 Exponent: %d\n", idx);
@@ -30524,7 +30530,7 @@ int wolfSSL_PEM_write_bio_RSAPrivateKey(WOLFSSL_BIO* bio, WOLFSSL_RSA* key,
         byte* derBuf;
 
         /* 5 > size of n, d, p, q, d%(p-1), d(q-1), 1/q%p, e + ASN.1 additional
-         *  informations
+         *  information
          */
         derMax = 5 * wolfSSL_RSA_size(key) + AES_BLOCK_SIZE;
 
@@ -30595,7 +30601,7 @@ int wolfSSL_PEM_write_bio_RSA_PUBKEY(WOLFSSL_BIO* bio, WOLFSSL_RSA* rsa)
     pkey->ownRsa = 0;
 
     /* 5 > size of n, d, p, q, d%(p-1), d(q-1), 1/q%p, e + ASN.1 additional
-        *  informations
+        *  information
         */
     derMax = 5 * wolfSSL_RSA_size(rsa) + AES_BLOCK_SIZE;
 
@@ -30834,7 +30840,7 @@ int wolfSSL_PEM_write_mem_RSAPrivateKey(RSA* rsa, const EVP_CIPHER* cipher,
     }
 
     /* 5 > size of n, d, p, q, d%(p-1), d(q-1), 1/q%p, e + ASN.1 additional
-     *  informations
+     *  information
      */
     der_max_len = 5 * wolfSSL_RSA_size(rsa) + AES_BLOCK_SIZE;
 
@@ -32547,8 +32553,7 @@ int wolfSSL_PEM_write_mem_ECPrivateKey(WOLFSSL_EC_KEY* ecc,
         }
     }
 
-    /* 4 > size of pub, priv + ASN.1 additional informations
-     */
+    /* 4 > size of pub, priv + ASN.1 additional information */
     der_max_len = 4 * wc_ecc_size((ecc_key*)ecc->internal) + AES_BLOCK_SIZE;
 
     derBuf = (byte*)XMALLOC(der_max_len, NULL, DYNAMIC_TYPE_DER);
@@ -32740,8 +32745,7 @@ int wolfSSL_PEM_write_mem_DSAPrivateKey(WOLFSSL_DSA* dsa,
         }
     }
 
-    /* 4 > size of pub, priv, p, q, g + ASN.1 additional informations
-     */
+    /* 4 > size of pub, priv, p, q, g + ASN.1 additional information */
     der_max_len = 4 * wolfSSL_BN_num_bytes(dsa->g) + AES_BLOCK_SIZE;
 
     derBuf = (byte*)XMALLOC(der_max_len, NULL, DYNAMIC_TYPE_DER);
@@ -33316,6 +33320,9 @@ int wolfSSL_RSA_print(WOLFSSL_BIO* bio, WOLFSSL_RSA* rsa, int offset)
             mp_to_unsigned_bin(rsaElem, rawKey);
             if ((word32)rawLen <= sizeof(word32)) {
                 idx = *(word32*)rawKey;
+                #ifdef BIG_ENDIAN_ORDER
+                    idx = ByteReverseWord32(idx);
+                #endif
             }
             XSNPRINTF(tmp, sizeof(tmp) - 1, "\nExponent: %d (0x%x)", idx, idx);
             if (wolfSSL_BIO_write(bio, tmp, (int)XSTRLEN(tmp)) <= 0) {
@@ -33521,7 +33528,7 @@ int wolfSSL_i2d_RSAPrivateKey(WOLFSSL_RSA *rsa, unsigned char **pp)
     }
 
     /* 5 > size of n, d, p, q, d%(p-1), d(q-1), 1/q%p, e + ASN.1 additional
-     *  informations
+     *  information
      */
     derMax = 5 * wolfSSL_RSA_size(rsa) + AES_BLOCK_SIZE;
 
@@ -38437,7 +38444,7 @@ int wolfSSL_PEM_write_bio_X509(WOLFSSL_BIO *bio, WOLFSSL_X509 *cert)
 
 
 #if defined(OPENSSL_EXTRA) && !defined(NO_DH)
-/* Intialize ctx->dh with dh's params. Return WOLFSSL_SUCCESS on ok */
+/* Initialize ctx->dh with dh's params. Return WOLFSSL_SUCCESS on ok */
 long wolfSSL_CTX_set_tmp_dh(WOLFSSL_CTX* ctx, WOLFSSL_DH* dh)
 {
     int pSz, gSz;

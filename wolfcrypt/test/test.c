@@ -24,6 +24,9 @@
     #include <config.h>
 #endif
 
+#ifndef WOLFSSL_USER_SETTINGS
+    #include <wolfssl/options.h>
+#endif
 #include <wolfssl/wolfcrypt/settings.h>
 #include <wolfssl/version.h>
 #include <wolfssl/wolfcrypt/wc_port.h>
@@ -538,8 +541,11 @@ int wolfcrypt_test(void* args)
 #endif
 
 #if !defined(NO_BIG_INT)
-    if (CheckCtcSettings() != 1)
+    if (CheckCtcSettings() != 1) {
+        printf("Sizeof mismatch (build) %x != (run) %x\n",
+            CTC_SETTINGS, CheckRunTimeSettings());
         return err_sys("Build vs runtime math mismatch\n", -1000);
+    }
 
 #if defined(USE_FAST_MATH) && \
 	(!defined(NO_RSA) || !defined(NO_DH) || defined(HAVE_ECC))
@@ -8974,7 +8980,7 @@ int memory_test(void)
         return -6514; /* memory not aligned */
     }
 
-    /* check for passing bad or unknown argments to functions */
+    /* check for passing bad or unknown arguments to functions */
     if (wolfSSL_StaticBufferSz(NULL, 1, WOLFMEM_GENERAL) > 0) {
         return -6515;
     }
@@ -9738,7 +9744,7 @@ int decodedCertCache_test(void)
 #endif /* defined(WOLFSSL_CERT_GEN_CACHE) && defined(WOLFSSL_TEST_CERT) &&
           defined(WOLFSSL_CERT_EXT) && defined(WOLFSSL_CERT_GEN) */
 
-#if !defined(NO_ASN) && !defined(WOLFSSL_RSA_VERIFY_ONLY)
+#if !defined(NO_ASN) && !defined(WOLFSSL_RSA_PUBLIC_ONLY)
 static int rsa_flatten_test(RsaKey* key)
 {
     int    ret;
@@ -10291,7 +10297,7 @@ static int rsa_decode_test(RsaKey* keyPub)
         goto done;
     }
 
-    /* Use good data and offest to bad data. */
+    /* Use good data and offset to bad data. */
     inOutIdx = 2;
     inSz = sizeof(good) - inOutIdx;
     ret = wc_RsaPublicKeyDecode(good, &inOutIdx, keyPub, inSz);
@@ -11581,13 +11587,17 @@ int rsa_test(void)
 #if defined(HAVE_NTRU)
     RsaKey caKey;
 #endif
-#if !defined(WOLFSSL_RSA_PUBLIC_ONLY) || defined(WOLFSSL_PUBLIC_MP)
+#ifndef NO_ASN
     word32 idx = 0;
+#endif
+#if !defined(WOLFSSL_RSA_VERIFY_ONLY) || defined(WOLFSSL_PUBLIC_MP)
     const char* inStr = "Everyone gets Friday off.";
     word32      inLen = (word32)XSTRLEN((char*)inStr);
-    byte*  res;
     const word32 outSz   = RSA_TEST_BYTES;
     const word32 plainSz = RSA_TEST_BYTES;
+#endif
+#if !defined(WOLFSSL_RSA_PUBLIC_ONLY) || defined(WOLFSSL_PUBLIC_MP)
+    byte*  res;
 #endif
 #ifndef NO_SIG_WRAPPER
     int modLen;
@@ -11601,7 +11611,7 @@ int rsa_test(void)
     DecodedCert cert;
 #endif
 
-#if !defined(WOLFSSL_RSA_PUBLIC_ONLY) || defined(WOLFSSL_PUBLIC_MP)
+#if !defined(WOLFSSL_RSA_VERIFY_ONLY) || defined(WOLFSSL_PUBLIC_MP)
     DECLARE_VAR_INIT(in, byte, inLen, inStr, HEAP_HINT);
     DECLARE_VAR(out, byte, RSA_TEST_BYTES, HEAP_HINT);
     DECLARE_VAR(plain, byte, RSA_TEST_BYTES, HEAP_HINT);
@@ -11851,6 +11861,16 @@ int rsa_test(void)
 #ifndef WOLFSSL_RSA_VERIFY_INLINE
 
 #if defined(WOLFSSL_CRYPTOCELL)
+        /*
+        Cryptocell requires the input data and signature byte array to verify.
+
+        first argument must be the input data
+        second argument must be the length of input data
+        third argument must be the signature byte array or the output from
+                                                                wc_RsaSSL_Sign()
+        fourth argument must be the length of the signature byte array
+        */
+
         ret = wc_RsaSSL_Verify(in, inLen, out, outSz, &key);
 #else
         ret = wc_RsaSSL_Verify(out, idx, plain, plainSz, &key);
@@ -11897,6 +11917,7 @@ int rsa_test(void)
     }
     TEST_SLEEP();
 
+#ifndef WOLFSSL_RSA_PUBLIC_ONLY
     idx = (word32)ret;
     do {
 #if defined(WOLFSSL_ASYNC_CRYPT)
@@ -11916,6 +11937,7 @@ int rsa_test(void)
     }
     TEST_SLEEP();
     #endif /* NO_SHA */
+#endif
 
     #ifndef NO_SHA256
     XMEMSET(plain, 0, plainSz);
@@ -19140,7 +19162,7 @@ static int curve25519_check_public_test(void)
                                                                  BAD_FUNC_ARG) {
         return -10301;
     }
-    /* Length of 0 treated differntly to other invalid lengths for TLS */
+    /* Length of 0 treated differently to other invalid lengths for TLS */
     if (wc_curve25519_check_public(good, 0, EC25519_LITTLE_ENDIAN) != BUFFER_E)
         return -10302;
     if (wc_curve25519_check_public(good, 0, EC25519_BIG_ENDIAN) != BUFFER_E)
@@ -19330,7 +19352,7 @@ int curve25519_test(void)
     if (XMEMCMP(ss, sharedB, y))
         return -8814;
 
-    /* test swaping roles of keys and generating same shared key */
+    /* test swapping roles of keys and generating same shared key */
     XMEMSET(sharedB, 0, sizeof(sharedB));
     y = sizeof(sharedB);
     if (wc_curve25519_shared_secret(&userB, &userA, sharedB, &y) != 0)
@@ -21328,7 +21350,13 @@ static int myDecryptionFunc(PKCS7* pkcs7, int encryptOID, byte* iv, int ivSz,
 
         /* keyIdRaw[0] OCTET TAG */
         /* keyIdRaw[1] Length */
+#ifdef BIG_ENDIAN_ORDER
+        if (keyIdRaw[1] == 0x01) {
+            keyId = 1;
+        }
+#else
         keyId = *(int*)(keyIdRaw + 2);
+#endif
     }
 
 
