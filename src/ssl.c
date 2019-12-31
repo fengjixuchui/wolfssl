@@ -2541,10 +2541,9 @@ int wolfSSL_CTX_UseSecureRenegotiation(WOLFSSL_CTX* ctx)
 
 
 /* do a secure renegotiation handshake, user forced, we discourage */
-int wolfSSL_Rehandshake(WOLFSSL* ssl)
+static int _Rehandshake(WOLFSSL* ssl)
 {
     int ret;
-    WOLFSSL_ENTER("wolfSSL_Rehandshake");
 
     if (ssl == NULL)
         return BAD_FUNC_ARG;
@@ -2613,15 +2612,38 @@ int wolfSSL_Rehandshake(WOLFSSL* ssl)
 }
 
 
+/* do a secure renegotiation handshake, user forced, we discourage */
+int wolfSSL_Rehandshake(WOLFSSL* ssl)
+{
+    int ret = WOLFSSL_SUCCESS;
+    WOLFSSL_ENTER("wolfSSL_Rehandshake");
+
+    if (ssl->options.side == WOLFSSL_SERVER_END) {
+        /* Reset option to send certificate verify. */
+        ssl->options.sendVerify = 0;
+    }
+    else {
+        /* Reset resuming flag to do full secure handshake. */
+        ssl->options.resuming = 0;
+        #ifdef HAVE_SESSION_TICKET
+            /* Clearing the ticket. */
+            ret = wolfSSL_UseSessionTicket(ssl);
+        #endif
+    }
+
+    if (ret == WOLFSSL_SUCCESS)
+        ret = _Rehandshake(ssl);
+
+    return ret;
+}
+
+
 #ifndef NO_WOLFSSL_CLIENT
 
 /* do a secure resumption handshake, user forced, we discourage */
 int wolfSSL_SecureResume(WOLFSSL* ssl)
 {
-    WOLFSSL_SESSION* session;
-    int ret;
-
-    WOLFSSL_ENTER("wolfSSL_SecureResume()");
+    WOLFSSL_ENTER("wolfSSL_SecureResume");
 
     if (ssl == NULL)
         return BAD_FUNC_ARG;
@@ -2631,13 +2653,7 @@ int wolfSSL_SecureResume(WOLFSSL* ssl)
         return SSL_FATAL_ERROR;
     }
 
-    session = wolfSSL_get_session(ssl);
-    ret = wolfSSL_set_session(ssl, session);
-    session = NULL;
-    if (ret == WOLFSSL_SUCCESS)
-        ret = wolfSSL_Rehandshake(ssl);
-
-    return ret;
+    return _Rehandshake(ssl);
 }
 
 #endif /* NO_WOLFSSL_CLIENT */
@@ -5415,6 +5431,7 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
 {
     DerBuffer*    der = NULL;        /* holds DER or RAW (for NTRU) */
     int           ret = 0;
+    int           done = 0;
     int           eccKey = 0;
     int           ed25519Key = 0;
     int           rsaKey = 0;
@@ -5532,18 +5549,22 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
     /* check for error */
     if (ret < 0) {
         FreeDer(&der);
-        return ret;
+        done = 1;
     }
 
+    if (done == 1) {
+        /* No operation, just skip the next section */
+    }
     /* Handle DER owner */
-    if (type == CA_TYPE) {
+    else if (type == CA_TYPE) {
         if (ctx == NULL) {
             WOLFSSL_MSG("Need context for CA load");
             FreeDer(&der);
             return BAD_FUNC_ARG;
         }
         /* verify CA unless user set to no verify */
-        return AddCA(ctx->cm, &der, WOLFSSL_USER_CA, verify);
+        ret = AddCA(ctx->cm, &der, WOLFSSL_USER_CA, verify);
+        done = 1;
     }
 #ifdef WOLFSSL_TRUST_PEER_CERT
     else if (type == TRUSTED_PEER_TYPE) {
@@ -5553,7 +5574,8 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
             return BAD_FUNC_ARG;
         }
         /* add trusted peer cert */
-        return AddTrustedPeer(ctx->cm, &der, !ctx->verifyNone);
+        ret = AddTrustedPeer(ctx->cm, &der, !ctx->verifyNone);
+        done = 1;
     }
 #endif /* WOLFSSL_TRUST_PEER_CERT */
     else if (type == CERT_TYPE) {
@@ -5608,7 +5630,10 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
         return WOLFSSL_BAD_CERTTYPE;
     }
 
-    if (type == PRIVATEKEY_TYPE && format != WOLFSSL_FILETYPE_RAW) {
+    if (done == 1) {
+        /* No operation, just skip the next section */
+    }
+    else if (type == PRIVATEKEY_TYPE && format != WOLFSSL_FILETYPE_RAW) {
     #if defined(WOLFSSL_ENCRYPTED_KEYS) || defined(HAVE_PKCS8)
         /* attempt to detect key type */
         if (algId == RSAk)
@@ -5895,9 +5920,25 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
     #endif
 
         if (ret != 0) {
-            return ret;
+            done = 1;
         }
     }
+
+    if (done == 1) {
+    #ifndef NO_WOLFSSL_CM_VERIFY
+        if ((type == CA_TYPE) || (type == CERT_TYPE)) {
+            /* Call to over-ride status */
+            if ((ctx != NULL) && (ctx->cm != NULL) &&
+                (ctx->cm->verifyCallback != NULL)) {
+                ret = CM_VerifyBuffer_ex(ctx->cm, buff,
+                        sz, format, (ret == WOLFSSL_SUCCESS ? 0 : ret));
+            }
+        }
+    #endif /* NO_WOLFSSL_CM_VERIFY */
+
+        return ret;
+    }
+
 
     if (ssl && resetSuites) {
         word16 havePSK = 0;
@@ -6164,9 +6205,21 @@ int wolfSSL_CertManagerDisableCRL(WOLFSSL_CERT_MANAGER* cm)
 
     return WOLFSSL_SUCCESS;
 }
+
+#ifndef NO_WOLFSSL_CM_VERIFY
+void wolfSSL_CertManagerSetVerify(WOLFSSL_CERT_MANAGER* cm, VerifyCallback vc)
+{
+    WOLFSSL_ENTER("wolfSSL_CertManagerSetVerify");
+    if (cm == NULL)
+        return;
+
+    cm->verifyCallback = vc;
+}
+#endif /* NO_WOLFSSL_CM_VERIFY */
+
 /* Verify the certificate, WOLFSSL_SUCCESS for ok, < 0 for error */
-int wolfSSL_CertManagerVerifyBuffer(WOLFSSL_CERT_MANAGER* cm, const byte* buff,
-                                    long sz, int format)
+int CM_VerifyBuffer_ex(WOLFSSL_CERT_MANAGER* cm, const byte* buff,
+                                    long sz, int format, int err_val)
 {
     int ret = 0;
     DerBuffer* der = NULL;
@@ -6212,6 +6265,43 @@ int wolfSSL_CertManagerVerifyBuffer(WOLFSSL_CERT_MANAGER* cm, const byte* buff,
         ret = CheckCertCRL(cm->crl, cert);
 #endif
 
+#ifndef NO_WOLFSSL_CM_VERIFY
+    /* if verify callback has been set */
+    if (cm->verifyCallback) {
+        buffer certBuf;
+    #ifdef WOLFSSL_SMALL_STACK
+        ProcPeerCertArgs* args = NULL;
+        args = (ProcPeerCertArgs*)XMALLOC(
+            sizeof(ProcPeerCertArgs), cm->heap, DYNAMIC_TYPE_TMP_BUFFER);
+        if (args == NULL) {
+            XFREE(cert, cm->heap, DYNAMIC_TYPE_DCERT);
+            return MEMORY_E;
+        }
+    #else
+        ProcPeerCertArgs  args[1];
+    #endif
+
+        certBuf.buffer = (byte*)buff;
+        certBuf.length = (unsigned int)sz;
+        XMEMSET(args, 0, sizeof(ProcPeerCertArgs));
+
+        args->totalCerts = 1;
+        args->certs = &certBuf;
+        args->dCert = cert;
+        args->dCertInit = 1;
+
+        if (err_val != 0) {
+            ret = err_val;
+        }
+        ret = DoVerifyCallback(cm, NULL, ret, args);
+    #ifdef WOLFSSL_SMALL_STACK
+        XFREE(args, cm->heap, DYNAMIC_TYPE_TMP_BUFFER);
+    #endif
+    }
+#else
+    (void)err_val;
+#endif
+
     FreeDecodedCert(cert);
     FreeDer(&der);
 #ifdef WOLFSSL_SMALL_STACK
@@ -6221,7 +6311,12 @@ int wolfSSL_CertManagerVerifyBuffer(WOLFSSL_CERT_MANAGER* cm, const byte* buff,
     return ret == 0 ? WOLFSSL_SUCCESS : ret;
 }
 
-
+/* Verify the certificate, WOLFSSL_SUCCESS for ok, < 0 for error */
+int wolfSSL_CertManagerVerifyBuffer(WOLFSSL_CERT_MANAGER* cm, const byte* buff,
+                                    long sz, int format)
+{
+    return CM_VerifyBuffer_ex(cm, buff, sz, format, 0);
+}
 /* turn on OCSP if off and compiled in, set options */
 int wolfSSL_CertManagerEnableOCSP(WOLFSSL_CERT_MANAGER* cm, int options)
 {
@@ -6658,9 +6753,10 @@ int ProcessFile(WOLFSSL_CTX* ctx, const char* fname, int format, int type,
             }
         }
         if ((type == CA_TYPE || type == TRUSTED_PEER_TYPE)
-                                              && format == WOLFSSL_FILETYPE_PEM)
+                                          && format == WOLFSSL_FILETYPE_PEM) {
             ret = ProcessChainBuffer(ctx, myBuffer, sz, format, type, ssl,
                                      verify);
+        }
 #ifdef HAVE_CRL
         else if (type == CRL_TYPE)
             ret = BufferLoadCRL(crl, myBuffer, sz, format, verify);
