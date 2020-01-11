@@ -1,6 +1,6 @@
 /* dsa.h
  *
- * Copyright (C) 2006-2019 wolfSSL Inc.
+ * Copyright (C) 2006-2020 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -65,12 +65,18 @@ WOLFSSL_API int wolfSSL_DSA_generate_parameters_ex(WOLFSSL_DSA*, int bits,
 
 WOLFSSL_API int wolfSSL_DSA_LoadDer(WOLFSSL_DSA*, const unsigned char*, int sz);
 
+WOLFSSL_API int wolfSSL_DSA_LoadDer_ex(WOLFSSL_DSA*, const unsigned char*,
+                                       int sz, int opt);
+
 WOLFSSL_API int wolfSSL_DSA_do_sign(const unsigned char* d,
                                     unsigned char* sigRet, WOLFSSL_DSA* dsa);
 
 WOLFSSL_API int wolfSSL_DSA_do_verify(const unsigned char* d,
                                       unsigned char* sig,
                                       WOLFSSL_DSA* dsa, int *dsacheck);
+
+#define WOLFSSL_DSA_LOAD_PRIVATE 1
+#define WOLFSSL_DSA_LOAD_PUBLIC  2
 
 #define DSA_new wolfSSL_DSA_new
 #define DSA_free wolfSSL_DSA_free

@@ -1,6 +1,6 @@
 /* bio.h
  *
- * Copyright (C) 2006-2019 wolfSSL Inc.
+ * Copyright (C) 2006-2020 wolfSSL Inc.
  *
  * This file is part of wolfSSL.
  *
@@ -98,6 +98,10 @@
 #define BIO_set_data               wolfSSL_BIO_set_data
 #define BIO_get_shutdown           wolfSSL_BIO_get_shutdown
 #define BIO_set_shutdown           wolfSSL_BIO_set_shutdown
+
+#define BIO_clear_flags            wolfSSL_BIO_clear_flags
+#define BIO_set_ex_data            wolfSSL_BIO_set_ex_data
+#define BIO_get_ex_data            wolfSSL_BIO_get_ex_data
 
 /* helper to set specific retry/read flags */
 #define BIO_set_retry_read(bio)\
