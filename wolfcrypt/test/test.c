@@ -221,7 +221,7 @@
 
 #if defined(NO_FILESYSTEM)
     #if !defined(USE_CERT_BUFFERS_1024) && !defined(USE_CERT_BUFFERS_2048) && \
-        !defined(USE_CERT_BUFFERS_4096)
+        !defined(USE_CERT_BUFFERS_3072) && !defined(USE_CERT_BUFFERS_4096)
         #define USE_CERT_BUFFERS_2048
     #endif
     #if !defined(USE_CERT_BUFFERS_256)
@@ -1518,11 +1518,7 @@ int asn_test(void)
     const byte* datePart;
 #ifndef NO_ASN_TIME
     struct tm timearg;
-    #ifdef WORD64_AVAILABLE
-        word64 now;
-    #else
-        word32 now;
-    #endif
+    time_t now;
 #endif
 
     ret = wc_GetDateInfo(dateBuf, (int)sizeof(dateBuf), &datePart, &format,
@@ -9280,13 +9276,18 @@ byte GetEntropy(ENTROPY_CMD cmd, byte* out)
 
 /* Generated Test Certs */
 #if !defined(USE_CERT_BUFFERS_1024) && !defined(USE_CERT_BUFFERS_2048) && \
-        !defined(NO_ASN)
+    !defined(USE_CERT_BUFFERS_3072) && !defined(NO_ASN)
     #ifndef NO_RSA
         static const char* clientKey  = CERT_ROOT "client-key.der";
         static const char* clientCert = CERT_ROOT "client-cert.der";
         #ifdef WOLFSSL_CERT_EXT
             static const char* clientKeyPub  = CERT_ROOT "client-keyPub.der";
         #endif
+    #endif
+#endif
+#if !defined(USE_CERT_BUFFERS_1024) && !defined(USE_CERT_BUFFERS_2048) && \
+    !defined(NO_ASN)
+    #ifndef NO_RSA
         #if defined(WOLFSSL_CERT_GEN) || defined(HAVE_PKCS7)
             static const char* rsaCaKeyFile  = CERT_ROOT "ca-key.der";
             #ifdef WOLFSSL_CERT_GEN
@@ -9303,6 +9304,9 @@ byte GetEntropy(ENTROPY_CMD cmd, byte* out)
             #endif
         #endif
     #endif /* !NO_RSA */
+#endif /* !USE_CERT_BUFFER_* */
+#if !defined(USE_CERT_BUFFERS_1024) && !defined(USE_CERT_BUFFERS_2048) && \
+    !defined(NO_ASN)
     #ifndef NO_DH
         static const char* dhKey = CERT_ROOT "dh2048.der";
     #endif
@@ -9956,12 +9960,14 @@ int decodedCertCache_test(void)
 #endif /* defined(WOLFSSL_CERT_GEN_CACHE) && defined(WOLFSSL_TEST_CERT) &&
           defined(WOLFSSL_CERT_EXT) && defined(WOLFSSL_CERT_GEN) */
 
+#define RSA_TEST_BYTES 384
+
 #if !defined(NO_ASN) && !defined(WOLFSSL_RSA_PUBLIC_ONLY)
 static int rsa_flatten_test(RsaKey* key)
 {
     int    ret;
-    byte   e[256];
-    byte   n[256];
+    byte   e[RSA_TEST_BYTES];
+    byte   n[RSA_TEST_BYTES];
     word32 eSz = sizeof(e);
     word32 nSz = sizeof(n);
 
@@ -10057,13 +10063,13 @@ static int rsa_export_key_test(RsaKey* key)
     int ret;
     byte e[3];
     word32 eSz = sizeof(e);
-    byte n[256];
+    byte n[RSA_TEST_BYTES];
     word32 nSz = sizeof(n);
-    byte d[256];
+    byte d[RSA_TEST_BYTES];
     word32 dSz = sizeof(d);
-    byte p[128];
+    byte p[RSA_TEST_BYTES/2];
     word32 pSz = sizeof(p);
-    byte q[128];
+    byte q[RSA_TEST_BYTES/2];
     word32 qSz = sizeof(q);
     word32 zero = 0;
 
@@ -10150,7 +10156,7 @@ static int rsa_sig_test(RsaKey* key, word32 keyLen, int modLen, WC_RNG* rng)
         0xa6, 0x58, 0x0a, 0x33, 0x0b, 0x84, 0x5f, 0x5f
     };
     word32 inLen = (word32)XSTRLEN((char*)in);
-    byte   out[256];
+    byte   out[RSA_TEST_BYTES];
 
     /* Parameter Validation testing. */
     ret = wc_SignatureGetSize(WC_SIGNATURE_TYPE_NONE, key, keyLen);
@@ -10663,8 +10669,6 @@ done:
 }
 #endif
 
-#define RSA_TEST_BYTES 256
-
 #ifdef WC_RSA_PSS
 static int rsa_pss_test(WC_RNG* rng, RsaKey* key)
 {
@@ -10987,8 +10991,8 @@ int rsa_no_pad_test(void)
     word32 idx     = 0;
     word32 outSz   = RSA_TEST_BYTES;
     word32 plainSz = RSA_TEST_BYTES;
-#if !defined(USE_CERT_BUFFERS_1024) && !defined(USE_CERT_BUFFERS_2048) \
-                                    && !defined(NO_FILESYSTEM)
+#if !defined(USE_CERT_BUFFERS_1024) && !defined(USE_CERT_BUFFERS_2048) && \
+    !defined(USE_CERT_BUFFERS_3072) && !defined(NO_FILESYSTEM)
     XFILE  file;
 #endif
     DECLARE_VAR(out, byte, RSA_TEST_BYTES, HEAP_HINT);
@@ -11022,6 +11026,8 @@ int rsa_no_pad_test(void)
     XMEMCPY(tmp, client_key_der_1024, (size_t)sizeof_client_key_der_1024);
 #elif defined(USE_CERT_BUFFERS_2048)
     XMEMCPY(tmp, client_key_der_2048, (size_t)sizeof_client_key_der_2048);
+#elif defined(USE_CERT_BUFFERS_3072)
+    XMEMCPY(tmp, client_key_der_3072, (size_t)sizeof_client_key_der_3072);
 #elif !defined(NO_FILESYSTEM)
     file = XFOPEN(clientKey, "rb");
     if (!file) {
@@ -11815,8 +11821,8 @@ int rsa_test(void)
 #ifndef NO_SIG_WRAPPER
     int modLen;
 #endif
-#if !defined(USE_CERT_BUFFERS_1024) && !defined(USE_CERT_BUFFERS_2048) \
-                                    && !defined(NO_FILESYSTEM)
+#if !defined(USE_CERT_BUFFERS_1024) && !defined(USE_CERT_BUFFERS_2048) && \
+    !defined(USE_CERT_BUFFERS_3072) && !defined(NO_FILESYSTEM)
     XFILE   file;
     XFILE   file2;
 #endif
@@ -11859,6 +11865,10 @@ int rsa_test(void)
     bytes = (size_t)sizeof_client_key_der_2048;
     if (bytes < (size_t)sizeof_client_cert_der_2048)
         bytes = (size_t)sizeof_client_cert_der_2048;
+#elif defined(USE_CERT_BUFFERS_3072)
+    bytes = (size_t)sizeof_client_key_der_3072;
+    if (bytes < (size_t)sizeof_client_cert_der_3072)
+        bytes = (size_t)sizeof_client_cert_der_3072;
 #else
 	bytes = FOURK_BUF;
 #endif
@@ -11876,6 +11886,8 @@ int rsa_test(void)
     XMEMCPY(tmp, client_key_der_1024, (size_t)sizeof_client_key_der_1024);
 #elif defined(USE_CERT_BUFFERS_2048)
     XMEMCPY(tmp, client_key_der_2048, (size_t)sizeof_client_key_der_2048);
+#elif defined(USE_CERT_BUFFERS_3072)
+    XMEMCPY(tmp, client_key_der_3072, (size_t)sizeof_client_key_der_3072);
 #elif !defined(NO_FILESYSTEM)
     file = XFOPEN(clientKey, "rb");
     if (!file) {
@@ -12440,6 +12452,9 @@ int rsa_test(void)
 #elif defined(USE_CERT_BUFFERS_2048)
     XMEMCPY(tmp, client_cert_der_2048, (size_t)sizeof_client_cert_der_2048);
     bytes = (size_t)sizeof_client_cert_der_2048;
+#elif defined(USE_CERT_BUFFERS_3072)
+    XMEMCPY(tmp, client_cert_der_3072, (size_t)sizeof_client_cert_der_3072);
+    bytes = (size_t)sizeof_client_cert_der_3072;
 #elif !defined(NO_FILESYSTEM)
     file2 = XFOPEN(clientCert, "rb");
     if (!file2) {
@@ -12479,6 +12494,9 @@ int rsa_test(void)
 #elif defined(USE_CERT_BUFFERS_2048)
     XMEMCPY(tmp, client_keypub_der_2048, sizeof_client_keypub_der_2048);
     bytes = sizeof_client_keypub_der_2048;
+#elif defined(USE_CERT_BUFFERS_3072)
+    XMEMCPY(tmp, client_keypub_der_3072, sizeof_client_keypub_der_3072);
+    bytes = sizeof_client_keypub_der_3072;
 #else
     file = XFOPEN(clientKeyPub, "rb");
     if (!file) {
@@ -15757,7 +15775,7 @@ int openssl_pkey1_test(void)
 {
     int ret = 0;
 #if !defined(NO_FILESYSTEM) && !defined(NO_RSA) && !defined(HAVE_USER_RSA) && \
-    !defined(NO_SHA) && !defined(USE_CERT_BUFFERS_1024)
+    !defined(NO_SHA)
     EVP_PKEY_CTX* dec = NULL;
     EVP_PKEY_CTX* enc = NULL;
     EVP_PKEY* pubKey  = NULL;
@@ -15768,16 +15786,31 @@ int openssl_pkey1_test(void)
     const unsigned char* clikey;
     unsigned char tmp[FOURK_BUF];
     long cliKeySz;
-    unsigned char cipher[256];
-    unsigned char plain[256];
-    size_t outlen = sizeof(cipher);
+    unsigned char cipher[RSA_TEST_BYTES];
+    unsigned char plain[RSA_TEST_BYTES];
+    size_t outlen;
+    int keyLenBits = 2048;
 
-#if defined(USE_CERT_BUFFERS_2048)
+#if defined(USE_CERT_BUFFERS_1024)
+    XMEMCPY(tmp, client_key_der_1024, sizeof_client_key_der_1024);
+    cliKeySz = (long)sizeof_client_key_der_1024;
+
+    x509 = wolfSSL_X509_load_certificate_buffer(client_cert_der_1024,
+            sizeof_client_cert_der_1024, SSL_FILETYPE_ASN1);
+    keyLenBits = 1024;
+#elif defined(USE_CERT_BUFFERS_2048)
     XMEMCPY(tmp, client_key_der_2048, sizeof_client_key_der_2048);
     cliKeySz = (long)sizeof_client_key_der_2048;
 
     x509 = wolfSSL_X509_load_certificate_buffer(client_cert_der_2048,
             sizeof_client_cert_der_2048, SSL_FILETYPE_ASN1);
+#elif defined(USE_CERT_BUFFERS_3072)
+    XMEMCPY(tmp, client_key_der_3072, sizeof_client_key_der_3072);
+    cliKeySz = (long)sizeof_client_key_der_3072;
+
+    x509 = wolfSSL_X509_load_certificate_buffer(client_cert_der_3072,
+            sizeof_client_cert_der_3072, SSL_FILETYPE_ASN1);
+    keyLenBits = 3072;
 #else
     XFILE f;
 
@@ -15821,12 +15854,12 @@ int openssl_pkey1_test(void)
     }
 
     /* phase 2 API to create EVP_PKEY_CTX and encrypt/decrypt */
-    if (EVP_PKEY_bits(prvKey) != 2048) {
+    if (EVP_PKEY_bits(prvKey) != keyLenBits) {
         ret = -7705;
         goto openssl_pkey1_test_done;
     }
 
-    if (EVP_PKEY_size(prvKey) != 256) {
+    if (EVP_PKEY_size(prvKey) != keyLenBits/8) {
         ret = -7706;
         goto openssl_pkey1_test_done;
     }
@@ -15866,13 +15899,14 @@ int openssl_pkey1_test(void)
 #endif
 
     XMEMSET(cipher, 0, sizeof(cipher));
+    outlen = keyLenBits/8;
     if (EVP_PKEY_encrypt(enc, cipher, &outlen, msg, sizeof(msg)) < 0) {
         ret = -7713;
         goto openssl_pkey1_test_done;
     }
 
     XMEMSET(plain, 0, sizeof(plain));
-    if (EVP_PKEY_decrypt(dec, plain, &outlen, cipher, sizeof(cipher)) != 1) {
+    if (EVP_PKEY_decrypt(dec, plain, &outlen, cipher, outlen) != 1) {
         ret = -7714;
         goto openssl_pkey1_test_done;
     }
@@ -18469,10 +18503,20 @@ static int ecc_test_custom_curves(WC_RNG* rng)
     ecc_key key;
 
     /* test use of custom curve - using BRAINPOOLP256R1 for test */
+    #ifndef WOLFSSL_ECC_CURVE_STATIC
+        const ecc_oid_t ecc_oid_brainpoolp256r1[] = {
+            0x2B,0x24,0x03,0x03,0x02,0x08,0x01,0x01,0x07
+        };
+        const word32 ecc_oid_brainpoolp256r1_sz =
+            sizeof(ecc_oid_brainpoolp256r1) / sizeof(ecc_oid_t);
+    #else
+        #define ecc_oid_brainpoolp256r1 { \
+            0x2B,0x24,0x03,0x03,0x02,0x08,0x01,0x01,0x07 \
+        }
+        #define ecc_oid_brainpoolp256r1_sz 9
+    #endif
     const word32 ecc_oid_brainpoolp256r1_sum = 104;
-    const ecc_oid_t ecc_oid_brainpoolp256r1[] = {
-        0x2B,0x24,0x03,0x03,0x02,0x08,0x01,0x01,0x07
-    };
+
     const ecc_set_type ecc_dp_brainpool256r1 = {
         32,                                                                 /* size/bytes */
         ECC_CURVE_CUSTOM,                                                   /* ID         */
@@ -18484,7 +18528,7 @@ static int ecc_test_custom_curves(WC_RNG* rng)
         "8BD2AEB9CB7E57CB2C4B482FFC81B7AFB9DE27E1E3BD23C23A4453BD9ACE3262", /* Gx         */
         "547EF835C3DAC4FD97F8461A14611DC9C27745132DED8E545C1D54C72F046997", /* Gy         */
         ecc_oid_brainpoolp256r1,                                            /* oid/oidSz  */
-        sizeof(ecc_oid_brainpoolp256r1) / sizeof(ecc_oid_t),
+        ecc_oid_brainpoolp256r1_sz,
         ecc_oid_brainpoolp256r1_sum,                                        /* oid sum    */
         1,                                                                  /* cofactor   */
     };

@@ -5232,8 +5232,7 @@ static int ProcessUserChain(WOLFSSL_CTX* ctx, const unsigned char* buff,
 }
 
 static int ProcessBufferTryDecode(WOLFSSL_CTX* ctx, WOLFSSL* ssl, DerBuffer* der,
-    int* keySz, word32* idx, int* resetSuites, int *rsaKey, int *eccKey,
-    int *ed25519Key, void* heap, int devId)
+    int* keySz, word32* idx, int* resetSuites, int* keyFormat, void* heap, int devId)
 {
     int ret = 0;
 
@@ -5242,11 +5241,11 @@ static int ProcessBufferTryDecode(WOLFSSL_CTX* ctx, WOLFSSL* ssl, DerBuffer* der
 
     if (ctx == NULL && ssl == NULL)
         return BAD_FUNC_ARG;
-    if (!der || !keySz || !idx || !resetSuites || !rsaKey || !eccKey || !ed25519Key)
+    if (!der || !keySz || !idx || !resetSuites || !keyFormat)
         return BAD_FUNC_ARG;
 
 #ifndef NO_RSA
-    if (ret == 0 && !*eccKey && !*ed25519Key) {
+    if (ret == 0 && (*keyFormat == 0 || *keyFormat == RSAk)) {
         /* make sure RSA key can be used */
     #ifdef WOLFSSL_SMALL_STACK
         RsaKey* key = NULL;
@@ -5265,13 +5264,8 @@ static int ProcessBufferTryDecode(WOLFSSL_CTX* ctx, WOLFSSL* ssl, DerBuffer* der
             *idx = 0;
             if (wc_RsaPrivateKeyDecode(der->buffer, idx, key, der->length)
                 != 0) {
-            #ifdef HAVE_ECC
-                /* could have DER ECC (or pkcs8 ecc), no easy way to tell */
-                *eccKey = 1;  /* try it next */
-            #elif defined(HAVE_ED25519)
-                *ed25519Key = 1; /* try it next */
-            #else
-                WOLFSSL_MSG("RSA decode failed and ECC not enabled to try");
+            #if !defined(HAVE_ECC) && !defined(HAVE_ED25519)
+                WOLFSSL_MSG("RSA decode failed and ECC/ED25519 not enabled to try");
                 ret = WOLFSSL_BAD_FILE;
             #endif
             }
@@ -5294,8 +5288,7 @@ static int ProcessBufferTryDecode(WOLFSSL_CTX* ctx, WOLFSSL* ssl, DerBuffer* der
                     ctx->privateKeySz = *keySz;
                 }
 
-                *rsaKey = 1;
-                (void)rsaKey;  /* for no ecc builds */
+                *keyFormat = RSAk;
 
                 if (ssl && ssl->options.side == WOLFSSL_SERVER_END) {
                     ssl->options.haveStaticECC = 0;
@@ -5312,7 +5305,7 @@ static int ProcessBufferTryDecode(WOLFSSL_CTX* ctx, WOLFSSL* ssl, DerBuffer* der
     }
 #endif
 #ifdef HAVE_ECC
-    if (ret == 0 && !*rsaKey && !*ed25519Key) {
+    if (ret == 0 && (*keyFormat == 0 || *keyFormat == ECDSAk)) {
         /* make sure ECC key can be used */
     #ifdef WOLFSSL_SMALL_STACK
         ecc_key* key = NULL;
@@ -5339,7 +5332,7 @@ static int ProcessBufferTryDecode(WOLFSSL_CTX* ctx, WOLFSSL* ssl, DerBuffer* der
                     ret = ECC_KEY_SIZE_E;
                 }
 
-                *eccKey = 1;
+                *keyFormat = ECDSAk;
                 if (ssl) {
                     ssl->options.haveStaticECC = 1;
                     ssl->buffers.keyType = ecc_dsa_sa_algo;
@@ -5355,8 +5348,6 @@ static int ProcessBufferTryDecode(WOLFSSL_CTX* ctx, WOLFSSL* ssl, DerBuffer* der
                     *resetSuites = 1;
                 }
             }
-            else
-                *eccKey = 0;
 
             wc_ecc_free(key);
         }
@@ -5367,7 +5358,7 @@ static int ProcessBufferTryDecode(WOLFSSL_CTX* ctx, WOLFSSL* ssl, DerBuffer* der
     }
 #endif /* HAVE_ECC */
 #ifdef HAVE_ED25519
-    if (ret == 0 && !*rsaKey && !*eccKey) {
+    if (ret == 0 && (*keyFormat == 0 || *keyFormat == ED25519k)) {
         /* make sure Ed25519 key can be used */
     #ifdef WOLFSSL_SMALL_STACK
         ed25519_key* key = NULL;
@@ -5410,7 +5401,7 @@ static int ProcessBufferTryDecode(WOLFSSL_CTX* ctx, WOLFSSL* ssl, DerBuffer* der
                     ctx->privateKeySz = *keySz;
                 }
 
-                *ed25519Key = 1;
+                *keyFormat = ED25519k;
                 if (ssl && ssl->options.side == WOLFSSL_SERVER_END) {
                     *resetSuites = 1;
                 }
@@ -5437,9 +5428,7 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
     DerBuffer*    der = NULL;        /* holds DER or RAW (for NTRU) */
     int           ret = 0;
     int           done = 0;
-    int           eccKey = 0;
-    int           ed25519Key = 0;
-    int           rsaKey = 0;
+    int           keyFormat = 0;
     int           resetSuites = 0;
     void*         heap = wolfSSL_CTX_GetHeap(ctx, ssl);
     int           devId = wolfSSL_CTX_GetDevId(ctx, ssl);
@@ -5455,7 +5444,6 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
     EncryptedInfo  info[1];
 #endif
 
-    (void)rsaKey;
     (void)devId;
     (void)idx;
     (void)keySz;
@@ -5488,7 +5476,7 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
 
     if (format == WOLFSSL_FILETYPE_PEM) {
     #ifdef WOLFSSL_PEM_TO_DER
-        ret = PemToDer(buff, sz, type, &der, heap, info, &eccKey);
+        ret = PemToDer(buff, sz, type, &der, heap, info, &keyFormat);
     #else
         ret = NOT_COMPILED_IN;
     #endif
@@ -5497,12 +5485,19 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
         /* ASN1 (DER) or RAW (NTRU) */
         int length = (int)sz;
         if (format == WOLFSSL_FILETYPE_ASN1) {
-            /* get length of der (read sequence) */
+            /* get length of der (read sequence or octet string) */
             word32 inOutIdx = 0;
-            if (GetSequence(buff, &inOutIdx, &length, (word32)sz) < 0) {
+            if (GetSequence(buff, &inOutIdx, &length, (word32)sz) >= 0) {
+                length += inOutIdx; /* include leading sequence */
+            }
+            /* get length using octect string (allowed for private key types) */
+            else if (type == PRIVATEKEY_TYPE &&
+                    GetOctetString(buff, &inOutIdx, &length, (word32)sz) >= 0) {
+                length += inOutIdx; /* include leading oct string */
+            }
+            else {
                 ret = ASN_PARSE_E;
             }
-            length += inOutIdx; /* include leading sequence */
         }
 
         info->consumed = length;
@@ -5640,22 +5635,16 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
     }
     else if (type == PRIVATEKEY_TYPE && format != WOLFSSL_FILETYPE_RAW) {
     #if defined(WOLFSSL_ENCRYPTED_KEYS) || defined(HAVE_PKCS8)
-        /* attempt to detect key type */
-        if (algId == RSAk)
-            rsaKey = 1;
-        else if (algId == ECDSAk)
-            eccKey = 1;
-        else if (algId == ED25519k)
-            ed25519Key = 1;
+        keyFormat = algId;
     #endif
 
         ret = ProcessBufferTryDecode(ctx, ssl, der, &keySz, &idx, &resetSuites,
-                &rsaKey, &eccKey, &ed25519Key, heap, devId);
+                &keyFormat, heap, devId);
 
     #if defined(WOLFSSL_ENCRYPTED_KEYS) && !defined(NO_PWDBASED)
         /* for WOLFSSL_FILETYPE_PEM, PemToDer manages the decryption */
         /* If private key type PKCS8 header wasn't already removed (algoId == 0) */
-        if ((ret != 0 || (!rsaKey && !eccKey && !ed25519Key))
+        if ((ret != 0 || keyFormat == 0)
             && format != WOLFSSL_FILETYPE_PEM && info->passwd_cb && algId == 0)
         {
             int   passwordSz = NAME_SZ;
@@ -5692,7 +5681,7 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
             XFREE(password, heap, DYNAMIC_TYPE_STRING);
         #endif
             ret = ProcessBufferTryDecode(ctx, ssl, der, &keySz, &idx,
-                &resetSuites, &rsaKey, &eccKey, &ed25519Key, heap, devId);
+                &resetSuites, &keyFormat, heap, devId);
         }
     #endif /* WOLFSSL_ENCRYPTED_KEYS && !NO_PWDBASED */
 
@@ -5702,9 +5691,9 @@ int ProcessBuffer(WOLFSSL_CTX* ctx, const unsigned char* buff,
 
         if (ret != 0)
             return ret;
-        if (!rsaKey && !eccKey && !ed25519Key)
+        if (keyFormat == 0)
             return WOLFSSL_BAD_FILE;
-        (void)ed25519Key;
+
         (void)devId;
     }
     else if (type == CERT_TYPE) {
@@ -9905,7 +9894,7 @@ int wolfSSL_use_PrivateKey(WOLFSSL* ssl, WOLFSSL_EVP_PKEY* pkey)
 }
 
 
-int wolfSSL_use_PrivateKey_ASN1(int pri, WOLFSSL* ssl, unsigned char* der,
+int wolfSSL_use_PrivateKey_ASN1(int pri, WOLFSSL* ssl, const unsigned char* der,
                                 long derSz)
 {
     WOLFSSL_ENTER("wolfSSL_use_PrivateKey_ASN1");
@@ -9970,7 +9959,8 @@ int wolfSSL_use_certificate(WOLFSSL* ssl, WOLFSSL_X509* x509)
 #endif /* OPENSSL_EXTRA */
 
 #ifndef NO_CERTS
-int wolfSSL_use_certificate_ASN1(WOLFSSL* ssl, unsigned char* der, int derSz)
+int wolfSSL_use_certificate_ASN1(WOLFSSL* ssl, const unsigned char* der,
+                                 int derSz)
 {
     long idx;
 
@@ -21678,6 +21668,7 @@ int wolfSSL_X509_cmp(const WOLFSSL_X509 *a, const WOLFSSL_X509 *b)
         /* free any existing data before copying */
         if (asn1->data != NULL && asn1->isDynamic) {
             XFREE(asn1->data, NULL, DYNAMIC_TYPE_OPENSSL);
+            asn1->data = NULL;
         }
 
         if (sz > CTC_NAME_SIZE) {
@@ -21691,6 +21682,7 @@ int wolfSSL_X509_cmp(const WOLFSSL_X509 *a, const WOLFSSL_X509 *b)
         else {
             XMEMSET(asn1->strData, 0, CTC_NAME_SIZE);
             asn1->data = asn1->strData;
+            asn1->isDynamic = 0;
         }
         if (data != NULL) {
             XMEMCPY(asn1->data, data, sz);
@@ -31498,8 +31490,8 @@ int wolfSSL_EVP_PKEY_set1_RSA(WOLFSSL_EVP_PKEY *pkey, WOLFSSL_RSA *key)
 }
 #endif /* !NO_RSA */
 
-#if defined(OPENSSL_ALL) || defined(WOLFSSL_QT)
-#ifndef NO_DSA
+#if defined(OPENSSL_ALL) || defined(WOLFSSL_QT) || defined(OPENSSL_EXTRA)
+#if !defined (NO_DSA) && !defined(HAVE_SELFTEST) && defined(WOLFSSL_KEY_GEN)
 /* with set1 functions the pkey struct does not own the DSA structure
  *
  * returns WOLFSSL_SUCCESS on success and WOLFSSL_FAILURE on failure
@@ -31606,7 +31598,7 @@ WOLFSSL_DSA* wolfSSL_EVP_PKEY_get1_DSA(WOLFSSL_EVP_PKEY* key)
     }
     return local;
 }
-#endif /* !NO_DSA */
+#endif /* !NO_DSA && !HAVE_SELFTEST && WOLFSSL_KEY_GEN */
 
 #ifdef HAVE_ECC
 WOLFSSL_EC_KEY *wolfSSL_EVP_PKEY_get0_EC_KEY(WOLFSSL_EVP_PKEY *pkey)
@@ -31656,7 +31648,9 @@ WOLFSSL_EC_KEY* wolfSSL_EVP_PKEY_get1_EC_KEY(WOLFSSL_EVP_PKEY* key)
     return local;
 }
 #endif /* HAVE_ECC */
+#endif /* OPENSSL_ALL || WOLFSSL_QT || OPENSSL_EXTRA */
 
+#if defined(OPENSSL_ALL) || defined(WOLFSSL_QT)
 #if !defined(NO_DH) && !defined(NO_FILESYSTEM)
 /* with set1 functions the pkey struct does not own the DH structure
  * Build the following DH Key format from the passed in WOLFSSL_DH
@@ -35258,14 +35252,14 @@ WOLFSSL_EVP_PKEY* wolfSSL_PEM_read_bio_PrivateKey(WOLFSSL_BIO* bio,
 
         if (keyFormat) {
             /* keyFormat is Key_Sum enum */
-            if (keyFormat == ECDSAk)
+            if (keyFormat == RSAk)
+                type = EVP_PKEY_RSA;
+            else if (keyFormat == ECDSAk)
                 type =  EVP_PKEY_EC;
             else if (keyFormat == DSAk)
                 type = EVP_PKEY_DSA;
-            #if defined(WOLFSSL_QT) || defined(OPENSSL_ALL)
             else if (keyFormat == DHk)
                 type = EVP_PKEY_DH;
-            #endif
         }
         else {
             /* Default to RSA if format is not set */
@@ -41241,6 +41235,7 @@ long wolfSSL_ctrl(WOLFSSL* ssl, int cmd, long opt, void* pt)
         return BAD_FUNC_ARG;
 
     switch (cmd) {
+        #if defined(WOLFSSL_NGINX) || defined(WOLFSSL_QT) || defined(OPENSSL_ALL)
         case SSL_CTRL_SET_TLSEXT_HOSTNAME:
             WOLFSSL_MSG("Entering Case: SSL_CTRL_SET_TLSEXT_HOSTNAME.");
         #ifdef HAVE_SNI
@@ -41253,6 +41248,7 @@ long wolfSSL_ctrl(WOLFSSL* ssl, int cmd, long opt, void* pt)
             WOLFSSL_MSG("SNI not enabled.");
             break;
         #endif /* HAVE_SNI */
+        #endif /* WOLFSSL_NGINX || WOLFSSL_QT || OPENSSL_ALL */
         default:
             WOLFSSL_MSG("Case not implemented.");
     }
