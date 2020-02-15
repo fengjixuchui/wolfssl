@@ -293,6 +293,9 @@ typedef STACK_OF(ACCESS_DESCRIPTION) AUTHORITY_INFO_ACCESS;
 /* wolfSSL does not support expoting keying material */
 #define SSL_export_keying_material(...) 0
 
+#define SSL_CTX_set1_groups_list        wolfSSL_CTX_set1_groups_list
+#define SSL_set1_groups_list            wolfSSL_set1_groups_list
+
 #define SSL_set_ex_data                 wolfSSL_set_ex_data
 #define SSL_get_shutdown                wolfSSL_get_shutdown
 #define SSL_set_rfd                     wolfSSL_set_rfd
@@ -844,7 +847,7 @@ wolfSSL_X509_STORE_set_verify_cb((WOLFSSL_X509_STORE *)(s), (WOLFSSL_X509_STORE_
 /* yassl had set the default to be 500 */
 #define SSL_get_default_timeout(ctx)    500
 
-#define DTLSv1_get_timeout(ssl, timeleft)   wolfSSL_DTLSv1_get_timeout((ssl), (Timeval*)(timeleft))
+#define DTLSv1_get_timeout(ssl, timeleft)   wolfSSL_DTLSv1_get_timeout((ssl), (WOLFSSL_TIMEVAL*)(timeleft))
 #define DTLSv1_handle_timeout               wolfSSL_DTLSv1_handle_timeout
 #define DTLSv1_set_initial_timeout_duration wolfSSL_DTLSv1_set_initial_timeout_duration
 

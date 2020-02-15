@@ -859,6 +859,9 @@ WOLFSSL_API int  wolfSSL_CTX_allow_post_handshake_auth(WOLFSSL_CTX* ctx);
 WOLFSSL_API int  wolfSSL_allow_post_handshake_auth(WOLFSSL* ssl);
 WOLFSSL_API int  wolfSSL_request_certificate(WOLFSSL* ssl);
 
+WOLFSSL_API int  wolfSSL_CTX_set1_groups_list(WOLFSSL_CTX *ctx, char *list);
+WOLFSSL_API int  wolfSSL_set1_groups_list(WOLFSSL *ssl, char *list);
+
 WOLFSSL_API int  wolfSSL_preferred_group(WOLFSSL* ssl);
 WOLFSSL_API int  wolfSSL_CTX_set_groups(WOLFSSL_CTX* ctx, int* groups,
                                         int count);
@@ -984,7 +987,8 @@ WOLFSSL_API int  wolfSSL_dtls_get_using_nonblock(WOLFSSL*);
 #define wolfSSL_get_using_nonblock wolfSSL_dtls_get_using_nonblock
     /* The old names are deprecated. */
 WOLFSSL_API int  wolfSSL_dtls_get_current_timeout(WOLFSSL* ssl);
-WOLFSSL_API int  wolfSSL_DTLSv1_get_timeout(WOLFSSL* ssl, Timeval* timeleft);
+WOLFSSL_API int  wolfSSL_DTLSv1_get_timeout(WOLFSSL* ssl,
+        WOLFSSL_TIMEVAL* timeleft);
 WOLFSSL_API void wolfSSL_DTLSv1_set_initial_timeout_duration(WOLFSSL* ssl,
     word32 duration_ms);
 WOLFSSL_API int  wolfSSL_DTLSv1_handle_timeout(WOLFSSL* ssl);
@@ -1278,12 +1282,15 @@ WOLFSSL_API int wolfSSL_RSA_print(WOLFSSL_BIO* bio, WOLFSSL_RSA* rsa, int offset
 WOLFSSL_API int wolfSSL_X509_print_ex(WOLFSSL_BIO* bio, WOLFSSL_X509* x509,
     unsigned long nmflags, unsigned long cflag);
 WOLFSSL_API int wolfSSL_X509_print(WOLFSSL_BIO* bio, WOLFSSL_X509* x509);
-WOLFSSL_API char*       wolfSSL_X509_NAME_oneline(WOLFSSL_X509_NAME*, char*, int);
+WOLFSSL_ABI WOLFSSL_API char* wolfSSL_X509_NAME_oneline(WOLFSSL_X509_NAME*,
+                                                                    char*, int);
 #if defined(OPENSSL_EXTRA) && defined(XSNPRINTF)
 WOLFSSL_API char* wolfSSL_X509_get_name_oneline(WOLFSSL_X509_NAME*, char*, int);
 #endif
-WOLFSSL_API WOLFSSL_X509_NAME*  wolfSSL_X509_get_issuer_name(WOLFSSL_X509*);
-WOLFSSL_API WOLFSSL_X509_NAME*  wolfSSL_X509_get_subject_name(WOLFSSL_X509*);
+WOLFSSL_ABI WOLFSSL_API WOLFSSL_X509_NAME* wolfSSL_X509_get_issuer_name(
+                                                                 WOLFSSL_X509*);
+WOLFSSL_ABI WOLFSSL_API WOLFSSL_X509_NAME* wolfSSL_X509_get_subject_name(
+                                                                 WOLFSSL_X509*);
 WOLFSSL_API int  wolfSSL_X509_ext_isSet_by_NID(WOLFSSL_X509*, int);
 WOLFSSL_API int  wolfSSL_X509_ext_get_critical_by_NID(WOLFSSL_X509*, int);
 WOLFSSL_API int  wolfSSL_X509_get_isCA(WOLFSSL_X509*);
@@ -2040,7 +2047,7 @@ WOLFSSL_API int wolfSSL_set_compression(WOLFSSL* ssl);
 WOLFSSL_ABI WOLFSSL_API int wolfSSL_set_timeout(WOLFSSL*, unsigned int);
 WOLFSSL_ABI WOLFSSL_API int wolfSSL_CTX_set_timeout(WOLFSSL_CTX*, unsigned int);
 WOLFSSL_API void wolfSSL_CTX_set_current_time_cb(WOLFSSL_CTX* ctx,
-    void (*cb)(const WOLFSSL* ssl, Timeval* out_clock));
+    void (*cb)(const WOLFSSL* ssl, WOLFSSL_TIMEVAL* out_clock));
 
 /* get wolfSSL peer X509_CHAIN */
 WOLFSSL_API WOLFSSL_X509_CHAIN* wolfSSL_get_peer_chain(WOLFSSL* ssl);
@@ -2301,7 +2308,7 @@ enum {
     WOLFSSL_CHAIN_CA = 2           /* added to cache from trusted chain */
 };
 
-WOLFSSL_API WC_RNG* wolfSSL_GetRNG(WOLFSSL*);
+WOLFSSL_ABI WOLFSSL_API WC_RNG* wolfSSL_GetRNG(WOLFSSL*);
 
 WOLFSSL_ABI WOLFSSL_API int wolfSSL_CTX_SetMinVersion(WOLFSSL_CTX*, int);
 WOLFSSL_API int wolfSSL_SetMinVersion(WOLFSSL*, int);
@@ -2707,7 +2714,7 @@ WOLFSSL_ABI WOLFSSL_API int wolfSSL_SetDevId(WOLFSSL*, int devId);
 WOLFSSL_ABI WOLFSSL_API int wolfSSL_CTX_SetDevId(WOLFSSL_CTX*, int devId);
 
 /* helpers to get device id and heap */
-WOLFSSL_API int   wolfSSL_CTX_GetDevId(WOLFSSL_CTX* ctx, WOLFSSL* ssl);
+WOLFSSL_ABI WOLFSSL_API int wolfSSL_CTX_GetDevId(WOLFSSL_CTX*, WOLFSSL*);
 WOLFSSL_API void* wolfSSL_CTX_GetHeap(WOLFSSL_CTX* ctx, WOLFSSL* ssl);
 
 /* TLS Extensions */
@@ -3085,9 +3092,9 @@ typedef int (*TimeoutCallBack)(TimeoutInfo*);
 /* wolfSSL connect extension allowing HandShakeCallBack and/or TimeoutCallBack
    for diagnostics */
 WOLFSSL_API int wolfSSL_connect_ex(WOLFSSL*, HandShakeCallBack, TimeoutCallBack,
-                                 Timeval);
+                                 WOLFSSL_TIMEVAL);
 WOLFSSL_API int wolfSSL_accept_ex(WOLFSSL*, HandShakeCallBack, TimeoutCallBack,
-                                Timeval);
+                                WOLFSSL_TIMEVAL);
 
 #endif /* WOLFSSL_CALLBACKS */
 

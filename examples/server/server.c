@@ -81,7 +81,11 @@ int catastrophic = 0; /* Use with -x flag to still exit when an error is
 static int lng_index = 0;
 
 #ifdef WOLFSSL_CALLBACKS
-    Timeval srvTo;
+    #if !defined(NO_OLD_TIMEVAL_NAME)
+        Timeval srvTo;
+    #else
+        WOLFSSL_TIMEVAL srvTo;
+    #endif
     static int srvHandShakeCB(HandShakeInfo* info)
     {
         (void)info;
@@ -936,9 +940,9 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
     char*  cipherList = NULL;
     int    useDefCipherList = 0;
     int    overrideDateErrors = 0;
-    const char* verifyCert = cliCertFile;
-    const char* ourCert    = svrCertFile;
-    const char* ourKey     = svrKeyFile;
+    const char* verifyCert;
+    const char* ourCert;
+    const char* ourKey;
     const char* ourDhParam = dhParamFile;
     tcp_ready*  readySignal = NULL;
     int    argc = ((func_args*)args)->argc;
@@ -1018,15 +1022,23 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
 
     ((func_args*)args)->return_code = -1; /* error state */
 
-#ifdef NO_RSA
+#ifndef NO_RSA
+    verifyCert = cliCertFile;
+    ourCert    = svrCertFile;
+    ourKey     = svrKeyFile;
+#else
     #ifdef HAVE_ECC
-        verifyCert = (char*)cliEccCertFile;
-        ourCert    = (char*)eccCertFile;
-        ourKey     = (char*)eccKeyFile;
+        verifyCert = cliEccCertFile;
+        ourCert    = eccCertFile;
+        ourKey     = eccKeyFile;
     #elif defined(HAVE_ED25519)
-        verifyCert = (char*)cliEdCertFile;
-        ourCert    = (char*)edCertFile;
-        ourKey     = (char*)edKeyFile;
+        verifyCert = cliEdCertFile;
+        ourCert    = edCertFile;
+        ourKey     = edKeyFile;
+    #else
+        verifyCert = NULL;
+        ourCert    = NULL;
+        ourKey     = NULL;
     #endif
 #endif
 
@@ -1049,6 +1061,7 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
     (void)mcastID;
     (void)loadCertKeyIntoSSLObj;
     (void)overrideDateErrors;
+    (void)nonBlocking;
 
 #ifdef WOLFSSL_TIRTOS
     fdOpenSession(Task_self());
@@ -1314,7 +1327,7 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
                         break;
                     }
                 }
-                if (throughput <= 0 || block <= 0) {
+                if (throughput == 0 || block <= 0) {
                     Usage();
                     XEXIT_T(MY_EX_USAGE);
                 }
