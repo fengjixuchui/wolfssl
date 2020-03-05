@@ -694,8 +694,14 @@ extern void uITRON4_free(void *p) ;
     #endif
     /* FreeRTOS pvPortRealloc() implementation can be found here:
         https://github.com/wolfSSL/wolfssl-freertos/pull/3/files */
-    #if !defined(USE_FAST_MATH) || defined(HAVE_ED25519) || defined(WOLFSSL_ESPIDF)
-        #define XREALLOC(p, n, h, t) pvPortRealloc((p), (n))
+    #if !defined(USE_FAST_MATH) || defined(HAVE_ED25519) || defined(HAVE_ED448)
+        #if defined(WOLFSSL_ESPIDF)
+            /*In IDF, realloc(p, n) is equivalent to 
+            heap_caps_realloc(p, s, MALLOC_CAP_8BIT) */
+            #define XREALLOC(p, n, h, t) realloc((p), (n))
+        #else
+            #define XREALLOC(p, n, h, t) pvPortRealloc((p), (n))
+        #endif
     #endif
     #ifndef NO_WRITEV
         #define NO_WRITEV
@@ -873,7 +879,7 @@ extern void uITRON4_free(void *p) ;
     #endif
     /* FreeRTOS pvPortRealloc() implementation can be found here:
         https://github.com/wolfSSL/wolfssl-freertos/pull/3/files */
-    #if !defined(USE_FAST_MATH) || defined(HAVE_ED25519)
+    #if !defined(USE_FAST_MATH) || defined(HAVE_ED25519) || defined(HAVE_ED448)
         #define XREALLOC(p, n, h, t) pvPortRealloc((p), (n))
     #endif
 #endif
@@ -1668,7 +1674,7 @@ extern void uITRON4_free(void *p) ;
     #endif
 #endif /* HAVE_ECC */
 
-/* Curve255519 Configs */
+/* Curve25519 Configs */
 #ifdef HAVE_CURVE25519
     /* By default enable shared secret, key export and import */
     #ifndef NO_CURVE25519_SHARED_SECRET
@@ -1685,7 +1691,7 @@ extern void uITRON4_free(void *p) ;
     #endif
 #endif /* HAVE_CURVE25519 */
 
-/* Ed255519 Configs */
+/* Ed25519 Configs */
 #ifdef HAVE_ED25519
     /* By default enable sign, verify, key export and import */
     #ifndef NO_ED25519_SIGN
@@ -1705,6 +1711,44 @@ extern void uITRON4_free(void *p) ;
         #define HAVE_ED25519_KEY_IMPORT
     #endif
 #endif /* HAVE_ED25519 */
+
+/* Curve448 Configs */
+#ifdef HAVE_CURVE448
+    /* By default enable shared secret, key export and import */
+    #ifndef NO_CURVE448_SHARED_SECRET
+        #undef HAVE_CURVE448_SHARED_SECRET
+        #define HAVE_CURVE448_SHARED_SECRET
+    #endif
+    #ifndef NO_CURVE448_KEY_EXPORT
+        #undef HAVE_CURVE448_KEY_EXPORT
+        #define HAVE_CURVE448_KEY_EXPORT
+    #endif
+    #ifndef NO_CURVE448_KEY_IMPORT
+        #undef HAVE_CURVE448_KEY_IMPORT
+        #define HAVE_CURVE448_KEY_IMPORT
+    #endif
+#endif /* HAVE_CURVE448 */
+
+/* Ed448 Configs */
+#ifdef HAVE_ED448
+    /* By default enable sign, verify, key export and import */
+    #ifndef NO_ED448_SIGN
+        #undef HAVE_ED448_SIGN
+        #define HAVE_ED448_SIGN
+    #endif
+    #ifndef NO_ED448_VERIFY
+        #undef HAVE_ED448_VERIFY
+        #define HAVE_ED448_VERIFY
+    #endif
+    #ifndef NO_ED448_KEY_EXPORT
+        #undef HAVE_ED448_KEY_EXPORT
+        #define HAVE_ED448_KEY_EXPORT
+    #endif
+    #ifndef NO_ED448_KEY_IMPORT
+        #undef HAVE_ED448_KEY_IMPORT
+        #define HAVE_ED448_KEY_IMPORT
+    #endif
+#endif /* HAVE_ED448 */
 
 /* AES Config */
 #ifndef NO_AES
@@ -1987,6 +2031,12 @@ extern void uITRON4_free(void *p) ;
         #define ED25519_SMALL
 #endif
 
+/* both CURVE and ED small math should be enabled */
+#ifdef CURVED448_SMALL
+        #define CURVE448_SMALL
+        #define ED448_SMALL
+#endif
+
 
 #ifndef WOLFSSL_ALERT_COUNT_MAX
     #define WOLFSSL_ALERT_COUNT_MAX 5
@@ -2085,7 +2135,7 @@ extern void uITRON4_free(void *p) ;
 #endif
 
 #if defined(WOLFCRYPT_ONLY) && defined(NO_AES) && !defined(HAVE_CURVE25519) && \
-                                   defined(WC_NO_RNG) && defined(WC_NO_RSA_OAEP)
+        !defined(HAVE_CURVE448) && defined(WC_NO_RNG) && defined(WC_NO_RSA_OAEP)
     #undef  WOLFSSL_NO_CONST_CMP
     #define WOLFSSL_NO_CONST_CMP
 #endif
@@ -2113,6 +2163,16 @@ extern void uITRON4_free(void *p) ;
 #if defined(HAVE_EX_DATA) || defined(FORTRESS)
     #define MAX_EX_DATA 5  /* allow for five items of ex_data */
 #endif
+
+#ifdef NO_WOLFSSL_SMALL_STACK
+    #undef WOLFSSL_SMALL_STACK
+#endif
+
+/* The client session cache requires time for timeout */
+#if defined(NO_ASN_TIME) && !defined(NO_SESSION_CACHE)
+    #define NO_SESSION_CACHE
+#endif
+
 
 #ifdef __cplusplus
     }   /* extern "C" */
