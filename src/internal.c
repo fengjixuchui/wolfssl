@@ -1740,8 +1740,12 @@ int InitSSL_Ctx(WOLFSSL_CTX* ctx, WOLFSSL_METHOD* method, void* heap)
 
     ctx->devId = INVALID_DEVID;
 
-#if defined(WOLFSSL_DTLS) && defined(WOLFSSL_SCTP)
-    ctx->dtlsMtuSz = MAX_RECORD_SIZE;
+#if defined(WOLFSSL_DTLS)
+    #ifdef WOLFSSL_SCTP
+        ctx->dtlsMtuSz = MAX_RECORD_SIZE;
+    #elif defined(WOLFSSL_DTLS_MTU)
+        ctx->dtlsMtuSz = MAX_MTU;
+    #endif
 #endif
 
 #ifndef NO_CERTS
@@ -4298,6 +4302,9 @@ int EccMakeKey(WOLFSSL* ssl, ecc_key* key, ecc_key* peer)
     /* make sure the curve is set for TLS */
     if (ret == 0 && key->dp) {
         ssl->ecdhCurveOID = key->dp->oidSum;
+    #if defined(WOLFSSL_TLS13) || defined(HAVE_FFDHE)
+        ssl->namedGroup = 0;
+    #endif
     }
 
     /* Handle async pending response */
@@ -4600,6 +4607,9 @@ static int X25519MakeKey(WOLFSSL* ssl, curve25519_key* key,
 
     if (ret == 0) {
         ssl->ecdhCurveOID = ECC_X25519_OID;
+    #if defined(WOLFSSL_TLS13) || defined(HAVE_FFDHE)
+        ssl->namedGroup = 0;
+    #endif
     }
 
     /* Handle async pending response */
@@ -4899,6 +4909,9 @@ static int X448MakeKey(WOLFSSL* ssl, curve448_key* key, curve448_key* peer)
 
     if (ret == 0) {
         ssl->ecdhCurveOID = ECC_X448_OID;
+    #if defined(WOLFSSL_TLS13) || defined(HAVE_FFDHE)
+        ssl->namedGroup = 0;
+    #endif
     }
 
     /* Handle async pending response */
@@ -5640,6 +5653,8 @@ int InitSSL(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup)
 #ifdef WOLFSSL_DTLS
     #ifdef WOLFSSL_SCTP
         ssl->options.dtlsSctp           = ctx->dtlsSctp;
+    #endif
+    #if defined(WOLFSSL_SCTP) || defined(WOLFSSL_DTLS_MTU)
         ssl->dtlsMtuSz                  = ctx->dtlsMtuSz;
         ssl->dtls_expected_rx           = ssl->dtlsMtuSz;
     #else
@@ -12068,7 +12083,8 @@ static int SanityCheckMsgReceived(WOLFSSL* ssl, byte type)
 
                 #ifndef NO_PSK
                     if (ssl->specs.kea == psk_kea &&
-                                               ssl->arrays->server_hint[0] == 0)
+                        ssl->arrays != NULL &&
+                        ssl->arrays->server_hint[0] == 0)
                         pskNoServerHint = 1;
                 #endif
                 if (ssl->specs.static_ecdh == 1 ||
@@ -18885,9 +18901,6 @@ int PickHashSigAlgo(WOLFSSL* ssl, const byte* hashSigAlgo, word32 hashSigAlgoSz)
                                       ssl->suites->sigAlgo == ecc_dsa_sa_algo) {
                 ssl->suites->sigAlgo = sigAlgo;
                 ssl->suites->hashAlgo = sha512_mac;
-            #if defined(WOLFSSL_TLS13) || defined(HAVE_FFDHE)
-                ssl->namedGroup = 0;
-            #endif
                 ret = 0;
                 break;
             }
@@ -18902,9 +18915,6 @@ int PickHashSigAlgo(WOLFSSL* ssl, const byte* hashSigAlgo, word32 hashSigAlgoSz)
                                       ssl->suites->sigAlgo == ecc_dsa_sa_algo) {
                 ssl->suites->sigAlgo = sigAlgo;
                 ssl->suites->hashAlgo = sha512_mac;
-            #if defined(WOLFSSL_TLS13) || defined(HAVE_FFDHE)
-                ssl->namedGroup = 0;
-            #endif
                 ret = 0;
                 break;
             }
@@ -18939,9 +18949,6 @@ int PickHashSigAlgo(WOLFSSL* ssl, const byte* hashSigAlgo, word32 hashSigAlgoSz)
             /* mark as highest and check remainder of hashSigAlgo list */
             ssl->suites->hashAlgo = hashAlgo;
             ssl->suites->sigAlgo = sigAlgo;
-        #if defined(WOLFSSL_TLS13) || defined(HAVE_FFDHE)
-            ssl->namedGroup = 0;
-        #endif
             ret = 0;
         }
         else
@@ -18982,9 +18989,6 @@ int PickHashSigAlgo(WOLFSSL* ssl, const byte* hashSigAlgo, word32 hashSigAlgoSz)
                     /* mark as highest and check remainder of hashSigAlgo list */
                     ssl->suites->hashAlgo = hashAlgo;
                     ssl->suites->sigAlgo = sigAlgo;
-                #if defined(WOLFSSL_TLS13) || defined(HAVE_FFDHE)
-                    ssl->namedGroup = 0;
-                #endif
                     break;
                 default:
                     continue;
@@ -20792,6 +20796,9 @@ static int DoServerKeyExchange(WOLFSSL* ssl, const byte* input,
                         ERROR_OUT(ECC_CURVE_ERROR, exit_dske);
                     }
                     ssl->ecdhCurveOID = curveOid;
+                #if defined(WOLFSSL_TLS13) || defined(HAVE_FFDHE)
+                    ssl->namedGroup = 0;
+                #endif
 
                     length = input[args->idx++];
                     if ((args->idx - args->begin) + length > size) {

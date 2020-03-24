@@ -7941,7 +7941,7 @@ static int DecodeAltNames(const byte* input, int sz, DecodedCert* cert)
             }
 
             ipAddr->type = ASN_IP_TYPE;
-            ipAddr->name = (char*)XMALLOC(strLen, cert->heap,
+            ipAddr->name = (char*)XMALLOC(strLen + 1, cert->heap,
                                          DYNAMIC_TYPE_ALTNAME);
             if (ipAddr->name == NULL) {
                 WOLFSSL_MSG("\tOut of Memory");
@@ -8916,6 +8916,17 @@ static int DecodeCertExtensions(DecodedCert* cert)
                 VERIFY_AND_SET_OID(cert->inhibitAnyOidSet);
                 WOLFSSL_MSG("Inhibit anyPolicy extension not supported yet.");
                 break;
+
+       #ifndef IGNORE_NETSCAPE_CERT_TYPE
+            case NETSCAPE_CT_OID:
+                WOLFSSL_MSG("Netscape certificate type extension not supported "
+                            "yet.");
+                if (CheckBitString(input, &idx, &length, idx + length, 0,
+                                                                    NULL) < 0) {
+                    return ASN_PARSE_E;
+                }
+                break;
+        #endif
 
             default:
             #ifndef WOLFSSL_NO_ASN_STRICT
@@ -10220,6 +10231,8 @@ int wc_EncryptedInfoParse(EncryptedInfo* info, char** pBuffer, size_t bufSz)
             }
             if ((newline != NULL) && (newline > finish)) {
                 info->ivSz = (word32)(newline - (finish + 1));
+                if (info->ivSz >= IV_SZ)
+                    return BUFFER_E;
                 if (XMEMCPY(info->iv, finish + 1, info->ivSz) == NULL)
                     return BUFFER_E;
                 info->set = 1;
@@ -10432,8 +10445,8 @@ int PemToDer(const unsigned char* buff, long longSz, int type,
     #endif
 #endif
 #ifdef OPENSSL_EXTRA
-    char        beginBuf[PEM_LINE_LEN];
-    char        endBuf[PEM_LINE_LEN];
+    char        beginBuf[PEM_LINE_LEN + 1]; /* add 1 for null terminator */
+    char        endBuf[PEM_LINE_LEN + 1];   /* add 1 for null terminator */
 #endif
 
     WOLFSSL_ENTER("PemToDer");
@@ -10504,7 +10517,8 @@ int PemToDer(const unsigned char* buff, long longSz, int type,
                             XSTR_SIZEOF(BEGIN_PRIV_KEY_PREFIX)) != 0) {
                 headerEnd--;
             }
-            if (XSTRNCMP(headerEnd, BEGIN_PRIV_KEY_PREFIX,
+            if (headerEnd <= (char*)buff ||
+                    XSTRNCMP(headerEnd, BEGIN_PRIV_KEY_PREFIX,
                     XSTR_SIZEOF(BEGIN_PRIV_KEY_PREFIX)) != 0 ||
                     beginEnd - headerEnd > PEM_LINE_LEN) {
                 WOLFSSL_MSG("Couldn't find PEM header");
