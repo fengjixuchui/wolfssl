@@ -2973,7 +2973,6 @@ WOLFSSL_ABI
 int wolfSSL_shutdown(WOLFSSL* ssl)
 {
     int  ret = WOLFSSL_FATAL_ERROR;
-    byte tmp;
     WOLFSSL_ENTER("SSL_shutdown()");
 
     if (ssl == NULL)
@@ -3012,16 +3011,16 @@ int wolfSSL_shutdown(WOLFSSL* ssl)
 
         /* call wolfSSL_shutdown again for bidirectional shutdown */
         if (ssl->options.sentNotify && !ssl->options.closeNotify) {
-            ret = wolfSSL_read(ssl, &tmp, 0);
-            if (ret < 0) {
+            ret = ProcessReply(ssl);
+            if (ret == ZERO_RETURN) {
+                /* simulate OpenSSL behavior */
+                ssl->error = WOLFSSL_ERROR_SYSCALL;
+                ret = WOLFSSL_SUCCESS;
+            } else if (ssl->error == WOLFSSL_ERROR_NONE) {
+                ret = WOLFSSL_SHUTDOWN_NOT_DONE;
+            } else {
                 WOLFSSL_ERROR(ssl->error);
                 ret = WOLFSSL_FATAL_ERROR;
-            } else if (ssl->options.closeNotify) {
-                ssl->error = WOLFSSL_ERROR_SYSCALL;   /* simulate OpenSSL behavior */
-                ret = WOLFSSL_SUCCESS;
-            } else if ((ssl->error == WOLFSSL_ERROR_NONE) &&
-                       (ret < WOLFSSL_SUCCESS)) {
-                ret = WOLFSSL_SHUTDOWN_NOT_DONE;
             }
         }
     }
@@ -3124,7 +3123,7 @@ int wolfSSL_want_write(WOLFSSL* ssl)
 
 char* wolfSSL_ERR_error_string(unsigned long errNumber, char* data)
 {
-    static const char* const msg = "Please supply a buffer for error string";
+    static wcchar msg = "Please supply a buffer for error string";
 
     WOLFSSL_ENTER("ERR_error_string");
     if (data) {
@@ -28430,7 +28429,7 @@ WOLFSSL_API WOLFSSL_EVP_PKEY *wolfSSL_PEM_read_PrivateKey(XFILE fp, WOLFSSL_EVP_
 #endif
 #endif
 
-#if !defined(NO_FILESYSTEM)
+#if !defined(NO_FILESYSTEM) && !defined(NO_WOLFSSL_DIR)
 /* Loads certificate(s) files in pem format into X509_STORE struct from either
  * a file or directory.
  * Returns WOLFSSL_SUCCESS on success or WOLFSSL_FAILURE if an error occurs.
@@ -28530,7 +28529,7 @@ WOLFSSL_API int wolfSSL_X509_STORE_load_locations(WOLFSSL_X509_STORE *str,
 
     return ret;
 }
-#endif
+#endif /* !NO_FILESYSTEM && !NO_WOLFSSL_DIR */
 
 #ifndef NO_WOLFSSL_STUB
 /*** TBD ***/
@@ -35084,7 +35083,7 @@ const char* wolfSSL_EC_curve_nid2nist(int nid)
 static int populate_groups(int* groups, int max_count, char *list)
 {
     char *end;
-    size_t len;
+    int len;
     int count = 0;
     const WOLF_EC_NIST_NAME* nist_name;
 
@@ -35098,15 +35097,16 @@ static int populate_groups(int* groups, int max_count, char *list)
             return -1;
         }
         while (*end != ':' && *end != '\0') end++;
-        len = end - list; /* end points to char after end
-                           * of curve name so no need for -1 */
+        len = (int)(end - list); /* end points to char after end
+                                  * of curve name so no need for -1 */
         if ((len < kNistCurves_MIN_NAME_LEN) ||
                 (len > kNistCurves_MAX_NAME_LEN)) {
             WOLFSSL_MSG("Unrecognized curve name in list");
             return -1;
         }
         for (nist_name = kNistCurves; nist_name->name != NULL; nist_name++) {
-            if (XSTRNCMP(list, nist_name->name, nist_name->name_len) == 0) {
+            if (len == nist_name->name_len &&
+                    XSTRNCMP(list, nist_name->name, nist_name->name_len) == 0) {
                 break;
             }
         }

@@ -4019,6 +4019,8 @@ struct WOLFSSL {
     DtlsMsg*        dtls_tx_msg_list;
     DtlsMsg*        dtls_tx_msg;
     DtlsMsg*        dtls_rx_msg_list;
+    byte*           dtls_pending_finished;
+    word32          dtls_pending_finished_sz;
     void*           IOCB_CookieCtx;     /* gen cookie ctx */
     word32          dtls_expected_rx;
 #ifdef WOLFSSL_SESSION_EXPORT
@@ -4499,10 +4501,20 @@ WOLFSSL_LOCAL word32  LowResTimer(void);
     WOLFSSL_LOCAL int  CopyDecodedToX509(WOLFSSL_X509*, DecodedCert*);
 #endif
 
+#ifndef MAX_CIPHER_NAME
+#define MAX_CIPHER_NAME 50
+#endif
+
+#ifdef WOLFSSL_NAMES_STATIC
+typedef char cipher_name[MAX_CIPHER_NAME];
+#else
+typedef const char* cipher_name;
+#endif
+
 typedef struct CipherSuiteInfo {
-    const char* name;
+    cipher_name name;
 #ifndef NO_ERROR_STRINGS
-    const char* name_iana;
+    cipher_name name_iana;
 #endif
     byte cipherSuite0;
     byte cipherSuite;
