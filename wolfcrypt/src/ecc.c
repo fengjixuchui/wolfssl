@@ -2534,8 +2534,10 @@ int wc_ecc_mulmod_ex(mp_int* k, ecc_point *G, ecc_point *R,
    #define WINSIZE  4
    #define M_POINTS 8
    int           first = 1, bitbuf = 0, bitcpy = 0, j;
-#else
+#elif defined(WC_NO_CACHE_RESISTANT)
    #define M_POINTS 4
+#else
+   #define M_POINTS 5
 #endif
 
    ecc_point     *tG, *M[M_POINTS];
@@ -2824,6 +2826,11 @@ int wc_ecc_mulmod_ex(mp_int* k, ecc_point *G, ecc_point *R,
 #ifdef WC_NO_CACHE_RESISTANT
    if (err == MP_OKAY)
        err = wc_ecc_copy_point(M[0], M[2]);
+#else
+   if (err == MP_OKAY)
+       err = wc_ecc_copy_point(M[0], M[3]);
+   if (err == MP_OKAY)
+       err = wc_ecc_copy_point(M[1], M[4]);
 #endif
 
    /* setup sliding window */
@@ -2867,78 +2874,68 @@ int wc_ecc_mulmod_ex(mp_int* k, ecc_point *G, ecc_point *R,
                if (err == MP_OKAY)
                    err = ecc_projective_dbl_point(M[i], M[i], a, modulus, mp);
            }
-
-           mode |= i;
 #else
            if (err == MP_OKAY)
-               err = ecc_projective_add_point(M[0], M[1], M[2], a, modulus,
-                                              mp);
+               err = ecc_projective_add_point(M[0], M[1], M[2], a, modulus, mp);
            if (err == MP_OKAY)
-               err = mp_copy(M[2]->x,
-                             (mp_int*)
-                             ( ((size_t)M[0]->x & wc_off_on_addr[mode&(i  )]) +
-                               ((size_t)M[1]->x & wc_off_on_addr[mode&(i^1)]) +
-                               ((size_t)M[2]->x & wc_off_on_addr[mode^1])) );
+               err = mp_cond_copy(M[2]->x, i, M[0]->x);
            if (err == MP_OKAY)
-               err = mp_copy(M[2]->y,
-                             (mp_int*)
-                             ( ((size_t)M[0]->y & wc_off_on_addr[mode&(i  )]) +
-                               ((size_t)M[1]->y & wc_off_on_addr[mode&(i^1)]) +
-                               ((size_t)M[2]->y & wc_off_on_addr[mode^1])) );
+               err = mp_cond_copy(M[2]->y, i, M[0]->y);
            if (err == MP_OKAY)
-               err = mp_copy(M[2]->z,
-                             (mp_int*)
-                             ( ((size_t)M[0]->z & wc_off_on_addr[mode&(i  )]) +
-                               ((size_t)M[1]->z & wc_off_on_addr[mode&(i^1)]) +
-                               ((size_t)M[2]->z & wc_off_on_addr[mode^1])) );
+               err = mp_cond_copy(M[2]->z, i, M[0]->z);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[2]->x, i ^ 1, M[1]->x);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[2]->y, i ^ 1, M[1]->y);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[2]->z, i ^ 1, M[1]->z);
 
-            /* instead of using M[i] for double, which leaks key bit to cache
-             * monitor, use M[2] as temp, make sure address calc is constant,
-             * keep M[0] and M[1] in cache */
            if (err == MP_OKAY)
-               err = mp_copy((mp_int*)
-                             ( ((size_t)M[0]->x & wc_off_on_addr[i^1]) +
-                               ((size_t)M[1]->x & wc_off_on_addr[i])),
-                             M[2]->x);
+               err = mp_cond_copy(M[0]->x, i ^ 1, M[2]->x);
            if (err == MP_OKAY)
-               err = mp_copy((mp_int*)
-                             ( ((size_t)M[0]->y & wc_off_on_addr[i^1]) +
-                               ((size_t)M[1]->y & wc_off_on_addr[i])),
-                             M[2]->y);
+               err = mp_cond_copy(M[0]->y, i ^ 1, M[2]->y);
            if (err == MP_OKAY)
-               err = mp_copy((mp_int*)
-                             ( ((size_t)M[0]->z & wc_off_on_addr[i^1]) +
-                               ((size_t)M[1]->z & wc_off_on_addr[i])),
-                             M[2]->z);
+               err = mp_cond_copy(M[0]->z, i ^ 1, M[2]->z);
            if (err == MP_OKAY)
-               err = ecc_projective_dbl_point(M[2], M[3], a, modulus, mp);
-           /* copy M[2] back to M[i] */
+               err = mp_cond_copy(M[1]->x, i, M[2]->x);
            if (err == MP_OKAY)
-               err = mp_copy((mp_int*)
-                             (((size_t)M[2]->x & wc_off_on_addr[mode^1]) +
-                              ((size_t)M[3]->x & wc_off_on_addr[mode])),
-                             (mp_int*)
-                             ( ((size_t)M[0]->x & wc_off_on_addr[i^1]) +
-                               ((size_t)M[1]->x & wc_off_on_addr[i])) );
+               err = mp_cond_copy(M[1]->y, i, M[2]->y);
            if (err == MP_OKAY)
-               err = mp_copy((mp_int*)
-                             (((size_t)M[2]->y & wc_off_on_addr[mode^1]) +
-                              ((size_t)M[3]->y & wc_off_on_addr[mode])),
-                             (mp_int*)
-                             ( ((size_t)M[0]->y & wc_off_on_addr[i^1]) +
-                               ((size_t)M[1]->y & wc_off_on_addr[i])) );
+               err = mp_cond_copy(M[1]->z, i, M[2]->z);
+
            if (err == MP_OKAY)
-               err = mp_copy((mp_int*)
-                             (((size_t)M[2]->z & wc_off_on_addr[mode^1]) +
-                              ((size_t)M[3]->z & wc_off_on_addr[mode])),
-                             (mp_int*)
-                             ( ((size_t)M[0]->z & wc_off_on_addr[i^1]) +
-                               ((size_t)M[1]->z & wc_off_on_addr[i])) );
+               err = ecc_projective_dbl_point(M[2], M[2], a, modulus, mp);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[2]->x, i ^ 1, M[0]->x);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[2]->y, i ^ 1, M[0]->y);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[2]->z, i ^ 1, M[0]->z);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[2]->x, i, M[1]->x);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[2]->y, i, M[1]->y);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[2]->z, i, M[1]->z);
+
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[3]->x, (mode ^ 1) & i, M[0]->x);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[3]->y, (mode ^ 1) & i, M[0]->y);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[3]->z, (mode ^ 1) & i, M[0]->z);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[4]->x, (mode ^ 1) & i, M[1]->x);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[4]->y, (mode ^ 1) & i, M[1]->y);
+           if (err == MP_OKAY)
+               err = mp_cond_copy(M[4]->z, (mode ^ 1) & i, M[1]->z);
+#endif /* WC_NO_CACHE_RESISTANT */
+
            if (err != MP_OKAY)
                break;
 
            mode |= i;
-#endif /* WC_NO_CACHE_RESISTANT */
        } /* end for */
    }
 
@@ -4016,18 +4013,19 @@ static int wc_ecc_make_pub_ex(ecc_key* key, ecc_curve_spec* curveIn,
     }
 
 
+    if (err != MP_OKAY) {
+    }
+    else
 #ifdef WOLFSSL_HAVE_SP_ECC
 #ifndef WOLFSSL_SP_NO_256
     if (key->idx != ECC_CUSTOM_IDX && ecc_sets[key->idx].id == ECC_SECP256R1) {
-        if (err == MP_OKAY)
-            err = sp_ecc_mulmod_base_256(&key->k, pub, 1, key->heap);
+        err = sp_ecc_mulmod_base_256(&key->k, pub, 1, key->heap);
     }
     else
 #endif
 #ifdef WOLFSSL_SP_384
     if (key->idx != ECC_CUSTOM_IDX && ecc_sets[key->idx].id == ECC_SECP384R1) {
-        if (err == MP_OKAY)
-            err = sp_ecc_mulmod_base_384(&key->k, pub, 1, key->heap);
+        err = sp_ecc_mulmod_base_384(&key->k, pub, 1, key->heap);
     }
     else
 #endif
@@ -4038,11 +4036,9 @@ static int wc_ecc_make_pub_ex(ecc_key* key, ecc_curve_spec* curveIn,
     {
         mp_digit mp;
 
-        if (err == MP_OKAY) {
-            base = wc_ecc_new_point_h(key->heap);
-            if (base == NULL)
-                err = MEMORY_E;
-        }
+        base = wc_ecc_new_point_h(key->heap);
+        if (base == NULL)
+            err = MEMORY_E;
         /* read in the x/y for this key */
         if (err == MP_OKAY)
             err = mp_copy(curve->Gx, base->x);
@@ -6292,7 +6288,9 @@ int wc_ecc_import_point_der(byte* in, word32 inLen, const int curve_idx,
                             ecc_point* point)
 {
     int err = 0;
+#ifdef HAVE_COMP_KEY
     int compressed = 0;
+#endif
     int keysize;
     byte pointType;
 
@@ -6425,8 +6423,12 @@ int wc_ecc_import_point_der(byte* in, word32 inLen, const int curve_idx,
     }
 #endif
 
-    if (err == MP_OKAY && compressed == 0)
-        err = mp_read_unsigned_bin(point->y, (byte*)in + keysize, keysize);
+    if (err == MP_OKAY) {
+#ifdef HAVE_COMP_KEY
+        if (compressed == 0)
+#endif
+            err = mp_read_unsigned_bin(point->y, (byte*)in + keysize, keysize);
+     }
     if (err == MP_OKAY)
         err = mp_set(point->z, 1);
 
@@ -7040,7 +7042,9 @@ int wc_ecc_import_x963_ex(const byte* in, word32 inLen, ecc_key* key,
                           int curve_id)
 {
     int err = MP_OKAY;
+#ifdef HAVE_COMP_KEY
     int compressed = 0;
+#endif
     int keysize = 0;
     byte pointType;
 
@@ -7092,9 +7096,11 @@ int wc_ecc_import_x963_ex(const byte* in, word32 inLen, ecc_key* key,
 
 #ifdef WOLFSSL_ATECC508A
     /* For SECP256R1 only save raw public key for hardware */
-    if (curve_id == ECC_SECP256R1 && !compressed &&
-                                            inLen <= sizeof(key->pubkey_raw)) {
-        XMEMCPY(key->pubkey_raw, (byte*)in, inLen);
+    if (curve_id == ECC_SECP256R1 && inLen <= sizeof(key->pubkey_raw)) {
+    #ifdef HAVE_COMP_KEY
+        if (!compressed)
+    #endif
+            XMEMCPY(key->pubkey_raw, (byte*)in, inLen);
     }
 #endif
 
@@ -7195,8 +7201,15 @@ int wc_ecc_import_x963_ex(const byte* in, word32 inLen, ecc_key* key,
     }
 #endif /* HAVE_COMP_KEY */
 
-    if (err == MP_OKAY && compressed == 0)
-        err = mp_read_unsigned_bin(key->pubkey.y, (byte*)in + keysize, keysize);
+    if (err == MP_OKAY) {
+    #ifdef HAVE_COMP_KEY
+        if (compressed == 0)
+    #endif
+        {
+            err = mp_read_unsigned_bin(key->pubkey.y, (byte*)in + keysize,
+                                                                      keysize);
+        }
+    }
     if (err == MP_OKAY)
         err = mp_set(key->pubkey.z, 1);
 
@@ -7602,18 +7615,15 @@ int wc_ecc_sig_to_rs(const byte* sig, word32 sigLen, byte* r, word32* rLen,
     /* rtmp and stmp are initialized */
     if (err == MP_OKAY) {
         tmp_valid = 1;
-    }
 
-    /* extract r */
-    if (err == MP_OKAY) {
+        /* extract r */
         x = mp_unsigned_bin_size(rtmp);
         if (*rLen < x)
             err = BUFFER_E;
-
-        if (err == MP_OKAY) {
-            *rLen = x;
-            err = mp_to_unsigned_bin(rtmp, r);
-        }
+    }
+    if (err == MP_OKAY) {
+        *rLen = x;
+        err = mp_to_unsigned_bin(rtmp, r);
     }
 
     /* extract s */
@@ -7720,19 +7730,21 @@ static int wc_ecc_import_raw_private(ecc_key* key, const char* qx,
         keySz = (word32)key->dp->size;
         err = wc_export_int(key->pubkey.x, &key_raw[1], &keySz, keySz,
             WC_TYPE_UNSIGNED_BIN);
-        if (err == MP_OKAY)
+        if (err == MP_OKAY) {
             err = wc_export_int(key->pubkey.y, &key_raw[1+keySz],
                 &keySz, keySz, WC_TYPE_UNSIGNED_BIN);
+        }
 
+        if (err == MP_OKAY) {
+            pDomain = CRYS_ECPKI_GetEcDomain(cc310_mapCurve(curve_id));
 
-        pDomain = CRYS_ECPKI_GetEcDomain(cc310_mapCurve(curve_id));
-
-        /* create public key from external key buffer */
-        err = CRYS_ECPKI_BuildPublKeyFullCheck(pDomain,
-                                               key_raw,
-                                               keySz*2 + 1,
-                                               &key->ctx.pubKey,
-                                               &tempBuff);
+            /* create public key from external key buffer */
+            err = CRYS_ECPKI_BuildPublKeyFullCheck(pDomain,
+                                                   key_raw,
+                                                   keySz*2 + 1,
+                                                   &key->ctx.pubKey,
+                                                   &tempBuff);
+        }
 
         if (err != SA_SILIB_RET_OK){
             WOLFSSL_MSG("CRYS_ECPKI_BuildPublKeyFullCheck failed");
@@ -9077,10 +9089,8 @@ static int accel_fp_mul2add(int idx1, int idx2,
                                                               mp)) != MP_OKAY) {
                 break;
              }
-          }
 
-          /* add if not first, otherwise copy */
-          if (!first) {
+             /* add if not first, otherwise copy */
              if (zA) {
                 if ((err = ecc_projective_add_point(R, fp_cache[idx1].LUT[zA],
                                                R, a, modulus, mp)) != MP_OKAY) {
@@ -9278,11 +9288,10 @@ int ecc_mul2add(ecc_point* A, mp_int* kA,
          ++(fp_cache[idx1].lru_count);
       }
 
-      if (err == MP_OKAY)
+      if (err == MP_OKAY) {
         /* find point */
         idx2 = find_base(B);
 
-      if (err == MP_OKAY) {
         /* no entry? */
         if (idx2 == -1) {
            /* find hole and add it */
@@ -10475,8 +10484,9 @@ int wc_ecc_get_oid(word32 oidSum, const byte** oid, word32* oidSz)
     /* find matching OID sum (based on encoded value) */
     for (x = 0; ecc_sets[x].size != 0; x++) {
         if (ecc_sets[x].oidSum == oidSum) {
-            int ret = 0;
+            int ret;
         #ifdef HAVE_OID_ENCODING
+            ret = 0;
             /* check cache */
             oid_cache_t* o = &ecc_oid_cache[x];
             if (o->oidSz == 0) {
@@ -10490,6 +10500,10 @@ int wc_ecc_get_oid(word32 oidSum, const byte** oid, word32* oidSz)
             if (oid) {
                 *oid = o->oid;
             }
+            /* on success return curve id */
+            if (ret == 0) {
+                ret = ecc_sets[x].id;
+            }
         #else
             if (oidSz) {
                 *oidSz = ecc_sets[x].oidSz;
@@ -10497,11 +10511,8 @@ int wc_ecc_get_oid(word32 oidSum, const byte** oid, word32* oidSz)
             if (oid) {
                 *oid = ecc_sets[x].oid;
             }
+            ret = ecc_sets[x].id;
         #endif
-            /* on success return curve id */
-            if (ret == 0) {
-                ret = ecc_sets[x].id;
-            }
             return ret;
         }
     }

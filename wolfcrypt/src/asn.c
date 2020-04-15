@@ -5466,7 +5466,7 @@ int wc_OBJ_sn2nid(const char *sn)
     if (XSTRNCMP(sn, "secp384r1", 10) == 0)
         sn = "SECP384R1";
     /* find based on name and return NID */
-    for (i = 0; ecc_sets[i].size != 0 && ecc_sets[i].name != NULL; i++) {
+    for (i = 0; ecc_sets[i].size != 0; i++) {
         if (XSTRNCMP(sn, ecc_sets[i].name, ECC_MAXNAME) == 0) {
             eccEnum = ecc_sets[i].id;
             /* Convert enum value in ecc_curve_id to OpenSSL NID */
@@ -7632,6 +7632,13 @@ static int DecodeAltNames(const byte* input, int sz, DecodedCert* cert)
 
     if (GetSequence(input, &idx, &length, sz) < 0) {
         WOLFSSL_MSG("\tBad Sequence");
+        return ASN_PARSE_E;
+    }
+
+    if (length == 0) {
+        /* RFC 5280 4.2.1.6.  Subject Alternative Name
+           If the subjectAltName extension is present, the sequence MUST
+           contain at least one entry. */
         return ASN_PARSE_E;
     }
 
@@ -10562,20 +10569,26 @@ int PemToDer(const unsigned char* buff, long longSz, int type,
             }
             /* decrypt the key */
             else {
-                ret = wc_BufferKeyDecrypt(info, der->buffer, der->length,
-                    (byte*)password, passwordSz, WC_MD5);
+                if (passwordSz == 0) {
+                    /* The key is encrypted but does not have a password */
+                    WOLFSSL_MSG("No password for encrypted key");
+                    ret = NO_PASSWORD;
+                }
+                else {
+                    ret = wc_BufferKeyDecrypt(info, der->buffer, der->length,
+                        (byte*)password, passwordSz, WC_MD5);
 
 #ifndef NO_WOLFSSL_SKIP_TRAILING_PAD
-            #ifndef NO_DES3
-                if (info->cipherType == WC_CIPHER_DES3) {
-                    padVal = der->buffer[der->length-1];
-                    if (padVal <= DES_BLOCK_SIZE) {
-                        der->length -= padVal;
+                #ifndef NO_DES3
+                    if (info->cipherType == WC_CIPHER_DES3) {
+                        padVal = der->buffer[der->length-1];
+                        if (padVal <= DES_BLOCK_SIZE) {
+                            der->length -= padVal;
+                        }
                     }
-                }
-            #endif /* !NO_DES3 */
+                #endif /* !NO_DES3 */
 #endif /* !NO_WOLFSSL_SKIP_TRAILING_PAD */
-
+                }
             }
 #ifdef OPENSSL_EXTRA
             if (ret) {
@@ -11387,11 +11400,7 @@ static
 void wc_SetCert_Free(Cert* cert)
 {
     if (cert != NULL) {
-
-        if (cert->der != NULL) {
-            cert->der = NULL;
-        }
-
+        cert->der = NULL;
         if (cert->decodedCert) {
             FreeDecodedCert((DecodedCert*)cert->decodedCert);
 
@@ -17086,8 +17095,8 @@ static int GetRevoked(const byte* buff, word32* idx, DecodedCRL* dcrl,
         return ret;
     }
 
-    if (*idx != end)  /* skip extensions */
-        *idx = end;
+    /* skip extensions */
+    *idx = end;
 
     return 0;
 }
@@ -17458,7 +17467,6 @@ int wc_ParseCertPIV(wc_CertPIV* piv, const byte* buf, word32 totalSz)
         if (GetASNHeader(buf, ASN_PIV_SIGNED_NONCE, &idx, &length, totalSz) >= 0) {
             piv->signedNonce =   &buf[idx];
             piv->signedNonceSz = length;
-            idx += length;
         }
 
         idx = 0;

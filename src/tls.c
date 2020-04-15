@@ -4793,18 +4793,24 @@ static int TLSX_SecureRenegotiation_Parse(WOLFSSL* ssl, byte* input,
                 }
             }
             else if (*input == TLS_FINISHED_SZ) {
-                input++; /* get past size */
+                if (length < TLS_FINISHED_SZ + 1) {
+                    WOLFSSL_MSG("SCR malformed buffer");
+                    ret = BUFFER_E;
+                }
+                else {
+                    input++; /* get past size */
 
-                /* validate client verify data */
-                if (XMEMCMP(input,
+                    /* validate client verify data */
+                    if (XMEMCMP(input,
                             ssl->secure_renegotiation->client_verify_data,
                             TLS_FINISHED_SZ) == 0) {
-                    WOLFSSL_MSG("SCR client verify data match");
-                    TLSX_SetResponse(ssl, TLSX_RENEGOTIATION_INFO);
-                    ret = 0;  /* verified */
-                } else {
-                    /* already in error state */
-                    WOLFSSL_MSG("SCR client verify data Failure");
+                        WOLFSSL_MSG("SCR client verify data match");
+                        TLSX_SetResponse(ssl, TLSX_RENEGOTIATION_INFO);
+                        ret = 0;  /* verified */
+                    } else {
+                        /* already in error state */
+                        WOLFSSL_MSG("SCR client verify data Failure");
+                    }
                 }
             }
         #endif
@@ -9001,13 +9007,13 @@ static int TLSX_EarlyData_Parse(WOLFSSL* ssl, byte* input, word16 length,
         return TLSX_EarlyData_Use(ssl, 1);
     }
     if (msgType == session_ticket) {
-        word32 max;
+        word32 maxSz;
 
         if (length != OPAQUE32_LEN)
             return BUFFER_E;
-        ato32(input, &max);
+        ato32(input, &maxSz);
 
-        ssl->session.maxEarlyDataSz = max;
+        ssl->session.maxEarlyDataSz = maxSz;
         return 0;
     }
 
