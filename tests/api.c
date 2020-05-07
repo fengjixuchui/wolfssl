@@ -20195,6 +20195,28 @@ static void test_wc_PemToDer(void)
 
     if (cert_buf)
         free(cert_buf);
+
+#ifdef HAVE_ECC
+    {
+        const char* ecc_private_key = "./certs/ecc-privOnlyKey.pem";
+        byte key_buf[256] = {0};
+
+        /* Test fail of loading a key with cert type */
+        AssertIntEQ(load_file(ecc_private_key, &cert_buf, &cert_sz), 0);
+        key_buf[0] = '\n';
+        XMEMCPY(key_buf + 1, cert_buf, cert_sz);
+        AssertIntNE((ret = wc_PemToDer(key_buf, cert_sz + 1, CERT_TYPE,
+            &pDer, NULL, &info, &eccKey)), 0);
+
+    #ifdef OPENSSL_EXTRA
+        AssertIntEQ((ret = wc_PemToDer(key_buf, cert_sz + 1, PRIVATEKEY_TYPE,
+            &pDer, NULL, &info, &eccKey)), 0);
+    #endif
+        wc_FreeDer(&pDer);
+        if (cert_buf)
+            free(cert_buf);
+    }
+#endif
     printf(resultFmt, passed);
 #endif
 }
@@ -28619,7 +28641,7 @@ static void test_wolfSSL_EVP_PKEY_derive(void)
     AssertIntEQ(EVP_PKEY_derive_init(ctx), 1);
     AssertIntEQ(EVP_PKEY_derive_set_peer(ctx, peerkey), 1);
     AssertIntEQ(EVP_PKEY_derive(ctx, NULL, &skeylen), 1);
-    AssertNotNull(skey = XMALLOC(skeylen, NULL, DYNAMIC_TYPE_OPENSSL));
+    AssertNotNull(skey = (unsigned char*)XMALLOC(skeylen, NULL, DYNAMIC_TYPE_OPENSSL));
     AssertIntEQ(EVP_PKEY_derive(ctx, skey, &skeylen), 1);
 
     EVP_PKEY_CTX_free(ctx);
@@ -28639,7 +28661,7 @@ static void test_wolfSSL_EVP_PKEY_derive(void)
     AssertIntEQ(EVP_PKEY_derive_init(ctx), 1);
     AssertIntEQ(EVP_PKEY_derive_set_peer(ctx, peerkey), 1);
     AssertIntEQ(EVP_PKEY_derive(ctx, NULL, &skeylen), 1);
-    AssertNotNull(skey = XMALLOC(skeylen, NULL, DYNAMIC_TYPE_OPENSSL));
+    AssertNotNull(skey = (unsigned char*)XMALLOC(skeylen, NULL, DYNAMIC_TYPE_OPENSSL));
     AssertIntEQ(EVP_PKEY_derive(ctx, skey, &skeylen), 1);
 
     EVP_PKEY_CTX_free(ctx);
@@ -30844,10 +30866,10 @@ static void test_wolfssl_EVP_aes_gcm(void)
 
         }
         AssertIntEQ(1, EVP_DecryptUpdate(&de[i], NULL, &len, aad, aadSz));
-        AssertIntEQ(1, EVP_CIPHER_CTX_ctrl(&de[i], EVP_CTRL_GCM_SET_TAG, AES_BLOCK_SIZE, tag));
         AssertIntEQ(1, EVP_DecryptUpdate(&de[i], decryptedtxt, &len, ciphertxt, ciphertxtSz));
         decryptedtxtSz = len;
-        AssertIntGT(EVP_DecryptFinal_ex(&de[i], decryptedtxt, &len), 0);
+        AssertIntEQ(1, EVP_CIPHER_CTX_ctrl(&de[i], EVP_CTRL_GCM_SET_TAG, AES_BLOCK_SIZE, tag));
+        AssertIntEQ(1, EVP_DecryptFinal_ex(&de[i], decryptedtxt, &len));
         decryptedtxtSz += len;
         AssertIntEQ(ciphertxtSz, decryptedtxtSz);
         AssertIntEQ(0, XMEMCMP(plaintxt, decryptedtxt, decryptedtxtSz));
@@ -30857,7 +30879,8 @@ static void test_wolfssl_EVP_aes_gcm(void)
         AssertIntEQ(1, EVP_DecryptUpdate(&de[i], NULL, &len, aad, aadSz));
         AssertIntEQ(1, EVP_CIPHER_CTX_ctrl(&de[i], EVP_CTRL_GCM_SET_TAG, AES_BLOCK_SIZE, tag));
         /* fail due to wrong tag */
-        AssertIntEQ(0, EVP_DecryptUpdate(&de[i], decryptedtxt, &len, ciphertxt, ciphertxtSz));
+        AssertIntEQ(1, EVP_DecryptUpdate(&de[i], decryptedtxt, &len, ciphertxt, ciphertxtSz));
+        AssertIntEQ(0, EVP_DecryptFinal_ex(&de[i], decryptedtxt, &len));
         AssertIntEQ(0, len);
     }
     printf(resultFmt, passed);
@@ -31015,7 +31038,7 @@ static void test_wolfSSL_ASN1_INTEGER_set()
 }
 
 /* Testing code used in dpp.c in hostap */
-#ifdef OPENSSL_ALL
+#if defined(OPENSSL_ALL) && defined(HAVE_ECC) && defined(USE_CERT_BUFFERS_256)
 typedef struct {
     /* AlgorithmIdentifier ecPublicKey with optional parameters present
      * as an OID identifying the curve */
@@ -31030,7 +31053,7 @@ ASN1_SEQUENCE(DPP_BOOTSTRAPPING_KEY) = {
 } ASN1_SEQUENCE_END(DPP_BOOTSTRAPPING_KEY);
 
 IMPLEMENT_ASN1_FUNCTIONS(DPP_BOOTSTRAPPING_KEY);
-#endif /* WOLFSSL_WPAS */
+#endif
 
 static void test_wolfSSL_IMPLEMENT_ASN1_FUNCTIONS()
 {
@@ -31064,7 +31087,7 @@ static void test_wolfSSL_IMPLEMENT_ASN1_FUNCTIONS()
     AssertIntGT((len = EC_POINT_point2oct(group, point, POINT_CONVERSION_UNCOMPRESSED,
                                           NULL, 0, NULL)), 0);
 #endif
-    AssertNotNull(der = XMALLOC(len, NULL, DYNAMIC_TYPE_ASN1));
+    AssertNotNull(der = (unsigned char*)XMALLOC(len, NULL, DYNAMIC_TYPE_ASN1));
 #ifdef HAVE_COMP_KEY
     AssertIntEQ(EC_POINT_point2oct(group, point, POINT_CONVERSION_COMPRESSED,
                                    der, len, NULL), len);
