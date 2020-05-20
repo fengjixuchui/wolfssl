@@ -10563,7 +10563,7 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
         #endif
 
             /* allocate buffer for certs */
-        #ifdef OPENSSL_EXTRA
+        #if defined(OPENSSL_EXTRA) || defined(OPENSSL_EXTRA_X509_SMALL)
             args->certs = (buffer*)XMALLOC(sizeof(buffer) *
                     (ssl->verifyDepth + 1), ssl->heap, DYNAMIC_TYPE_DER);
             if (args->certs == NULL) {
@@ -10665,7 +10665,8 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
             args->count = args->totalCerts;
             args->certIdx = 0; /* select peer cert (first one) */
 
-            if (args->count == 0 && ssl->options.mutualAuth &&
+            if (args->count == 0 && (ssl->options.mutualAuth ||
+                 (ssl->options.failNoCert && IsAtLeastTLSv1_3(ssl->version))) &&
                                       ssl->options.side == WOLFSSL_SERVER_END) {
                 ret = NO_PEER_CERT;
                 DoCertFatalAlert(ssl, ret);
@@ -17521,7 +17522,7 @@ int SendAlert(WOLFSSL* ssl, int severity, int type)
     /* only send encrypted alert if handshake actually complete, otherwise
        other side may not be able to handle it */
     if (IsEncryptionOn(ssl, 1) && (IsAtLeastTLSv1_3(ssl->version) ||
-                                                  ssl->options.handShakeDone)) {
+                                                         ssl->encrypt.setup)) {
         sendSz = BuildMessage(ssl, output, outputSz, input, ALERT_SIZE, alert,
                                                                        0, 0, 0);
     }
@@ -20240,7 +20241,11 @@ exit_dpk:
             else
     #endif
             if (ssl->ctx->method->version.major == SSLv3_MAJOR &&
-                             ssl->ctx->method->version.minor == TLSv1_2_MINOR) {
+                                ssl->ctx->method->version.minor == TLSv1_2_MINOR
+#ifdef OPENSSL_EXTRA
+                          && (wolfSSL_get_options(ssl) & SSL_OP_NO_TLSv1_2) == 0
+#endif
+            ) {
                 /* TLS v1.2 capable client not allowed to downgrade when
                  * connecting to TLS v1.2 capable server.
                  */
@@ -24232,6 +24237,9 @@ static int DoSessionTicket(WOLFSSL* ssl, const byte* input, word32* inOutIdx,
 #endif
             if (ssl->ctx->method->version.major == SSLv3_MAJOR &&
                           ssl->ctx->method->version.minor == TLSv1_2_MINOR &&
+#ifdef OPENSSL_EXTRA
+                          (wolfSSL_get_options(ssl) & SSL_OP_NO_TLSv1_2) == 0 &&
+#endif
                                                        !IsAtLeastTLSv1_2(ssl)) {
                 /* TLS v1.2 capable server downgraded. */
                 XMEMCPY(output + idx + RAN_LEN - (TLS13_DOWNGRADE_SZ + 1),
