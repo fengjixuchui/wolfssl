@@ -987,7 +987,7 @@ const ecc_set_type ecc_sets[] = {
         "FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551", /* order      */
         "6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296", /* Gx         */
         "4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5", /* Gy         */
-		ecc_oid_secp256r1,                                                  /* oid/oidSz  */
+        ecc_oid_secp256r1,                                                  /* oid/oidSz  */
         ecc_oid_secp256r1_sz,
         ECC_SECP256R1_OID,                                                  /* oid sum    */
         1,                                                                  /* cofactor   */
@@ -9391,10 +9391,11 @@ int ecc_mul2add(ecc_point* A, mp_int* kA,
        return err;
 
 #ifndef HAVE_THREAD_LS
-   if (initMutex == 0) {
+   if (initMutex == 0) { /* extra sanity check if wolfCrypt_Init not called */
         wc_InitMutex(&ecc_fp_lock);
         initMutex = 1;
    }
+
    if (wc_LockMutex(&ecc_fp_lock) != 0)
       return BAD_MUTEX_E;
 #endif /* HAVE_THREAD_LS */
@@ -9518,7 +9519,7 @@ int wc_ecc_mulmod_ex(mp_int* k, ecc_point *G, ecc_point *R, mp_int* a,
        return MP_INIT_E;
 
 #ifndef HAVE_THREAD_LS
-   if (initMutex == 0) {
+   if (initMutex == 0) { /* extra sanity check if wolfCrypt_Init not called */
         wc_InitMutex(&ecc_fp_lock);
         initMutex = 1;
    }
@@ -9623,12 +9624,27 @@ static void wc_ecc_fp_free_cache(void)
 }
 #endif
 
+
+/** Init the Fixed Point cache */
+void wc_ecc_fp_init(void)
+{
+#ifndef WOLFSSL_SP_MATH
+#ifndef HAVE_THREAD_LS
+   if (initMutex == 0) {
+        wc_InitMutex(&ecc_fp_lock);
+        initMutex = 1;
+   }
+#endif
+#endif
+}
+
+
 /** Free the Fixed Point cache */
 void wc_ecc_fp_free(void)
 {
 #ifndef WOLFSSL_SP_MATH
 #ifndef HAVE_THREAD_LS
-   if (initMutex == 0) {
+   if (initMutex == 0) { /* extra sanity check if wolfCrypt_Init not called */
         wc_InitMutex(&ecc_fp_lock);
         initMutex = 1;
    }
