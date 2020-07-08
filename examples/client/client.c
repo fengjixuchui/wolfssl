@@ -802,7 +802,8 @@ static int SMTP_Shutdown(WOLFSSL* ssl, int wc_shutdown)
     return WOLFSSL_SUCCESS;
 }
 
-static void ClientWrite(WOLFSSL* ssl, char* msg, int msgSz, const char* str)
+static int ClientWrite(WOLFSSL* ssl, char* msg, int msgSz, const char* str, 
+    int exitWithRet)
 {
     int ret, err;
     char buffer[WOLFSSL_MAX_ERROR_SZ];
@@ -827,8 +828,12 @@ static void ClientWrite(WOLFSSL* ssl, char* msg, int msgSz, const char* str)
     if (ret != msgSz) {
         printf("SSL_write%s msg error %d, %s\n", str, err,
                                         wolfSSL_ERR_error_string(err, buffer));
-        err_sys("SSL_write failed");
+        if (!exitWithRet) {
+            err_sys("SSL_write failed");
+        }
     }
+
+    return err;
 }
 
 static int ClientRead(WOLFSSL* ssl, char* reply, int replyLen, int mustRead,
@@ -1371,6 +1376,9 @@ static void Usage(void)
 #endif
 }
 
+#define MSG32 32
+#define GETMSGSZ 29
+
 THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 {
     SOCKET_T sockfd = WOLFSSL_SOCKET_INVALID;
@@ -1385,11 +1393,11 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     int              flatSessionSz = 0;
 
 #ifndef WOLFSSL_ALT_TEST_STRINGS
-    char msg[32] = "hello wolfssl!";   /* GET may make bigger */
-    char resumeMsg[32] = "resuming wolfssl!";
+    char msg[MSG32] = "hello wolfssl!";   /* GET may make bigger */
+    char resumeMsg[MSG32] = "resuming wolfssl!";
 #else
-    char msg[32] = "hello wolfssl!\n";
-    char resumeMsg[32] = "resuming wolfssl!\n";
+    char msg[MSG32] = "hello wolfssl!\n";
+    char resumeMsg[MSG32] = "resuming wolfssl!\n";
 #endif
 
     char reply[128];
@@ -1439,7 +1447,6 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     int    pkCallbacks   = 0;
     PkCbInfo pkCbInfo;
 #endif
-    int    overrideDateErrors = 0;
     int    minDhKeyBits  = DEFAULT_MIN_DHKEY_BITS;
     char*  alpnList = NULL;
     unsigned char alpn_opt = 0;
@@ -1570,7 +1577,6 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     (void)ourCert;
     (void)verifyCert;
     (void)useClientCert;
-    (void)overrideDateErrors;
     (void)disableCRL;
     (void)minDhKeyBits;
     (void)alpnList;
@@ -1616,7 +1622,7 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
                 XEXIT_T(EXIT_SUCCESS);
 
             case 'D' :
-                overrideDateErrors = 1;
+                myVerifyAction = VERIFY_OVERRIDE_DATE_ERR;
                 break;
 
             case 'C' :
@@ -1728,7 +1734,11 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
                 }
                 else if (XSTRNCMP(myoptarg, "verifyFail", 10) == 0) {
                     printf("Verify should fail\n");
-                    myVerifyFail = 1;
+                    myVerifyAction = VERIFY_FORCE_FAIL;
+                }
+                else if (XSTRNCMP(myoptarg, "verifyInfo", 10) == 0) {
+                    printf("Verify should not override error\n");
+                    myVerifyAction = VERIFY_USE_PREVERFIY;
                 }
                 else if (XSTRNCMP(myoptarg, "useSupCurve", 11) == 0) {
                     printf("Attempting to test use supported curve\n");
@@ -2080,7 +2090,7 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 
         #ifndef NO_PSK
         if (usePsk) {
-            done += 1; /* don't perform exernal tests if PSK is enabled */
+            done += 1; /* don't perform external tests if PSK is enabled */
         }
         #endif
 
@@ -2305,16 +2315,17 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 
     if (usePsk) {
 #ifndef NO_PSK
+        const char *defaultCipherList = cipherList;
+
         wolfSSL_CTX_set_psk_client_callback(ctx, my_psk_client_cb);
     #ifdef WOLFSSL_TLS13
         wolfSSL_CTX_set_psk_client_tls13_callback(ctx, my_psk_client_tls13_cb);
     #endif
-        if (cipherList == NULL) {
-            const char *defaultCipherList;
+        if (defaultCipherList == NULL) {
         #if defined(HAVE_AESGCM) && !defined(NO_DH)
             #ifdef WOLFSSL_TLS13
-                defaultCipherList = "DHE-PSK-AES128-GCM-SHA256:"
-                                    "TLS13-AES128-GCM-SHA256";
+                defaultCipherList = "TLS13-AES128-GCM-SHA256:"
+                                    "DHE-PSK-AES128-GCM-SHA256:";
             #else
                 defaultCipherList = "DHE-PSK-AES128-GCM-SHA256";
             #endif
@@ -2323,12 +2334,13 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
         #else
                 defaultCipherList = "PSK-AES128-CBC-SHA256";
         #endif
-            if (wolfSSL_CTX_set_cipher_list(ctx,defaultCipherList)
+            if (wolfSSL_CTX_set_cipher_list(ctx, defaultCipherList)
                                                             !=WOLFSSL_SUCCESS) {
                 wolfSSL_CTX_free(ctx); ctx = NULL;
                 err_sys("client can't set cipher list 2");
             }
         }
+        wolfSSL_CTX_set_psk_callback_ctx(ctx, (void*)defaultCipherList);
 #endif
         if (useClientCert) {
             useClientCert = 0;
@@ -2364,7 +2376,7 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 #endif
 
 #if defined(WOLFSSL_SNIFFER)
-    if (cipherList == NULL) {
+    if (cipherList == NULL && version < 4) {
         /* don't use EDH, can't sniff tmp keys */
         if (wolfSSL_CTX_set_cipher_list(ctx, "AES128-SHA") != WOLFSSL_SUCCESS) {
             wolfSSL_CTX_free(ctx); ctx = NULL;
@@ -2438,7 +2450,7 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     #endif
     }
 
-    if (!usePsk && !useAnon && !useVerifyCb && !myVerifyFail) {
+    if (!usePsk && !useAnon && !useVerifyCb && myVerifyAction != VERIFY_FORCE_FAIL) {
     #ifndef TEST_LOAD_BUFFER
         unsigned int verify_flags = 0;
     #ifdef TEST_BEFORE_DATE
@@ -2475,12 +2487,16 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
         }
     #endif /* WOLFSSL_TRUST_PEER_CERT && !NO_FILESYSTEM */
     }
-    if (useVerifyCb || myVerifyFail)
+    if (useVerifyCb || myVerifyAction == VERIFY_FORCE_FAIL || 
+            myVerifyAction == VERIFY_USE_PREVERFIY) {
         wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER, myVerify);
-    else if (!usePsk && !useAnon && doPeerCheck == 0)
+    }
+    else if (!usePsk && !useAnon && doPeerCheck == 0) {
         wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, 0);
-    else if (!usePsk && !useAnon && overrideDateErrors == 1)
-        wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER, myDateCb);
+    }
+    else if (!usePsk && !useAnon && myVerifyAction == VERIFY_OVERRIDE_DATE_ERR) {
+        wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER, myVerify);
+    }
 #endif /* !NO_CERTS */
 
 #ifdef WOLFSSL_ASYNC_CRYPT
@@ -2737,8 +2753,8 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     if (doMcast) {
 #ifdef WOLFSSL_MULTICAST
         byte pms[512]; /* pre master secret */
-        byte cr[32];   /* client random */
-        byte sr[32];   /* server random */
+        byte cr[MSG32];   /* client random */
+        byte sr[MSG32];   /* server random */
         const byte suite[2] = {0, 0xfe};  /* WDM_WITH_NULL_SHA256 */
 
         XMEMSET(pms, 0x23, sizeof(pms));
@@ -3043,13 +3059,28 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
         } else {
             if (!resumeScr) {
                 printf("Beginning secure rengotiation.\n");
-                if (wolfSSL_Rehandshake(ssl) != WOLFSSL_SUCCESS) {
+                if ((ret = wolfSSL_Rehandshake(ssl)) != WOLFSSL_SUCCESS) {
                     err = wolfSSL_get_error(ssl, 0);
-                    printf("err = %d, %s\n", err,
-                                    wolfSSL_ERR_error_string(err, buffer));
-                    wolfSSL_free(ssl); ssl = NULL;
-                    wolfSSL_CTX_free(ctx); ctx = NULL;
-                    err_sys("wolfSSL_Rehandshake failed");
+#ifdef WOLFSSL_ASYNC_CRYPT
+                    while (err == WC_PENDING_E) {
+                        err = 0;
+                        ret = wolfSSL_negotiate(ssl);
+                        if (ret != WOLFSSL_SUCCESS) {
+                            err = wolfSSL_get_error(ssl, 0);
+                            if (err == WC_PENDING_E) {
+                                ret = wolfSSL_AsyncPoll(ssl, WOLF_POLL_FLAG_CHECK_HW);
+                                if (ret < 0) break;
+                            }
+                        }
+                    }
+#endif
+                    if (ret != WOLFSSL_SUCCESS) {
+                        printf("err = %d, %s\n", err,
+                                        wolfSSL_ERR_error_string(err, buffer));
+                        wolfSSL_free(ssl); ssl = NULL;
+                        wolfSSL_CTX_free(ctx); ctx = NULL;
+                        err_sys("wolfSSL_Rehandshake failed");
+                    }
                 }
                 else {
                     printf("RENEGOTIATION SUCCESSFUL\n");
@@ -3057,13 +3088,28 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
             }
             else {
                 printf("Beginning secure resumption.\n");
-                if (wolfSSL_SecureResume(ssl) != WOLFSSL_SUCCESS) {
+                if ((ret = wolfSSL_SecureResume(ssl)) != WOLFSSL_SUCCESS) {
                     err = wolfSSL_get_error(ssl, 0);
-                    printf("err = %d, %s\n", err,
-                                    wolfSSL_ERR_error_string(err, buffer));
-                    wolfSSL_free(ssl); ssl = NULL;
-                    wolfSSL_CTX_free(ctx); ctx = NULL;
-                    err_sys("wolfSSL_SecureResume failed");
+#ifdef WOLFSSL_ASYNC_CRYPT
+                    while (err == WC_PENDING_E) {
+                        err = 0;
+                        ret = wolfSSL_negotiate(ssl);
+                        if (ret != WOLFSSL_SUCCESS) {
+                            err = wolfSSL_get_error(ssl, 0);
+                            if (err == WC_PENDING_E) {
+                                ret = wolfSSL_AsyncPoll(ssl, WOLF_POLL_FLAG_CHECK_HW);
+                                if (ret < 0) break;
+                            }
+                        }
+                    }
+#endif
+                    if (ret != WOLFSSL_SUCCESS) {
+                        printf("err = %d, %s\n", err,
+                                        wolfSSL_ERR_error_string(err, buffer));
+                        wolfSSL_free(ssl); ssl = NULL;
+                        wolfSSL_CTX_free(ctx); ctx = NULL;
+                        err_sys("wolfSSL_SecureResume failed");
+                    }
                 }
                 else {
                     printf("SECURE RESUMPTION SUCCESSFUL\n");
@@ -3074,14 +3120,14 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 #endif /* HAVE_SECURE_RENEGOTIATION */
 
     if (sendGET) {
+        char msgGet[GETMSGSZ] = "GET /index.html HTTP/1.0\r\n\r\n";
         printf("SSL connect ok, sending GET...\n");
-        msgSz = sizeof("GET /index.html HTTP/1.0\r\n\r\n");
-        XSTRNCPY(msg, "GET /index.html HTTP/1.0\r\n\r\n", msgSz);
-        msg[msgSz] = '\0';
 
-        resumeSz = msgSz;
-        XSTRNCPY(resumeMsg, "GET /index.html HTTP/1.0\r\n\r\n", resumeSz);
-        resumeMsg[resumeSz] = '\0';
+        XMEMSET(msg, 0, MSG32);
+        XMEMSET(resumeMsg, 0, MSG32);
+        msgSz = resumeSz = (int) XSTRLEN(msgGet);
+        XMEMCPY(msg, msgGet, msgSz);
+        XMEMCPY(resumeMsg, msgGet, resumeSz);
     }
 
 /* allow some time for exporting the session */
@@ -3100,7 +3146,11 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
         wolfSSL_update_keys(ssl);
 #endif
 
-    ClientWrite(ssl, msg, msgSz, "");
+    err = ClientWrite(ssl, msg, msgSz, "", exitWithRet);
+    if (exitWithRet && (err != 0)) {
+        ((func_args*)args)->return_code = err;
+        goto exit;
+    }
 
     err = ClientRead(ssl, reply, sizeof(reply)-1, 1, "", exitWithRet);
     if (exitWithRet && (err != 0)) {
@@ -3110,7 +3160,7 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 
 #if defined(WOLFSSL_TLS13)
     if (updateKeysIVs || postHandAuth)
-        ClientWrite(ssl, msg, msgSz, "");
+        (void)ClientWrite(ssl, msg, msgSz, "", 0);
 #endif
     if (sendGET) {  /* get html */
         (void)ClientRead(ssl, reply, sizeof(reply)-1, 0, "", 0);
@@ -3362,12 +3412,12 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     }
 #endif /* HAVE_SECURE_RENEGOTIATION */
 
-        ClientWrite(sslResume, resumeMsg, resumeSz, " resume");
+        (void)ClientWrite(sslResume, resumeMsg, resumeSz, " resume", 0);
 
         (void)ClientRead(sslResume, reply, sizeof(reply)-1, sendGET,
                          "Server resume: ", 0);
         /* try to send session break */
-        ClientWrite(sslResume, msg, msgSz, " resume 2");
+        (void)ClientWrite(sslResume, msg, msgSz, " resume 2", 0);
 
         ret = wolfSSL_shutdown(sslResume);
         if (wc_shutdown && ret == WOLFSSL_SHUTDOWN_NOT_DONE)
@@ -3411,7 +3461,6 @@ exit:
     /* There are use cases  when these assignments are not read. To avoid
      * potential confusion those warnings have been handled here.
      */
-    (void) overrideDateErrors;
     (void) useClientCert;
     (void) verifyCert;
     (void) ourCert;

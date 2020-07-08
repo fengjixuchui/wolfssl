@@ -517,7 +517,7 @@ struct WOLFSSL_X509_STORE {
     WOLFSSL_CRYPTO_EX_DATA ex_data;
 #endif
 #if (defined(OPENSSL_EXTRA) || defined(WOLFSSL_WPAS_SMALL)) && defined(HAVE_CRL)
-    WOLFSSL_X509_CRL *crl;
+    WOLFSSL_X509_CRL *crl; /* points to cm->crl */
 #endif
 };
 
@@ -1157,7 +1157,7 @@ WOLFSSL_API WOLFSSL_SESSION* wolfSSL_SESSION_dup(WOLFSSL_SESSION* session);
 WOLFSSL_API void wolfSSL_SESSION_free(WOLFSSL_SESSION* session);
 WOLFSSL_API int  wolfSSL_is_init_finished(WOLFSSL*);
 
-WOLFSSL_API const char*  wolfSSL_get_version(WOLFSSL*);
+WOLFSSL_API const char*  wolfSSL_get_version(const WOLFSSL*);
 WOLFSSL_API int  wolfSSL_get_current_cipher_suite(WOLFSSL* ssl);
 WOLFSSL_API WOLFSSL_CIPHER*  wolfSSL_get_current_cipher(WOLFSSL*);
 WOLFSSL_API char* wolfSSL_CIPHER_description(const WOLFSSL_CIPHER*, char*, int);
@@ -1950,6 +1950,11 @@ enum { /* ssl Constants */
     WOLFSSL_API void wolfSSL_set_psk_server_tls13_callback(WOLFSSL*,
                                                   wc_psk_server_tls13_callback);
 #endif
+    WOLFSSL_API void* wolfSSL_get_psk_callback_ctx(WOLFSSL*);
+    WOLFSSL_API int   wolfSSL_set_psk_callback_ctx(WOLFSSL*, void*);
+
+    WOLFSSL_API void* wolfSSL_CTX_get_psk_callback_ctx(WOLFSSL_CTX*);
+    WOLFSSL_API int   wolfSSL_CTX_set_psk_callback_ctx(WOLFSSL_CTX*, void*);
 
     #define PSK_TYPES_DEFINED
 #endif /* NO_PSK */
@@ -2088,6 +2093,7 @@ WOLFSSL_ABI WOLFSSL_API int wolfSSL_Cleanup(void);
 
 /* which library version do we have */
 WOLFSSL_API const char* wolfSSL_lib_version(void);
+WOLFSSL_API const char* wolfSSL_OpenSSL_version(void);
 /* which library version do we have in hex */
 WOLFSSL_API word32 wolfSSL_lib_version_hex(void);
 
@@ -2425,6 +2431,7 @@ WOLFSSL_API void  wolfSSL_SetVerifyDecryptCtx(WOLFSSL* ssl, void *ctx);
 WOLFSSL_API void* wolfSSL_GetVerifyDecryptCtx(WOLFSSL* ssl);
 
 WOLFSSL_API const unsigned char* wolfSSL_GetMacSecret(WOLFSSL*, int);
+WOLFSSL_API const unsigned char* wolfSSL_GetDtlsMacSecret(WOLFSSL*, int, int);
 WOLFSSL_API const unsigned char* wolfSSL_GetClientWriteKey(WOLFSSL*);
 WOLFSSL_API const unsigned char* wolfSSL_GetClientWriteIV(WOLFSSL*);
 WOLFSSL_API const unsigned char* wolfSSL_GetServerWriteKey(WOLFSSL*);
@@ -3500,6 +3507,8 @@ WOLFSSL_API int wolfSSL_CRYPTO_set_mem_ex_functions(void *(*m) (size_t, const ch
     void *(*r) (void *, size_t, const char *, int), void (*f) (void *));
 
 WOLFSSL_API void wolfSSL_CRYPTO_cleanup_all_ex_data(void);
+
+WOLFSSL_API int wolfSSL_CRYPTO_memcmp(const void *a, const void *b, size_t size);
 
 WOLFSSL_API WOLFSSL_BIGNUM* wolfSSL_DH_768_prime(WOLFSSL_BIGNUM* bn);
 WOLFSSL_API WOLFSSL_BIGNUM* wolfSSL_DH_1024_prime(WOLFSSL_BIGNUM* bn);

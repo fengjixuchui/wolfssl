@@ -1502,7 +1502,7 @@ static int sp_2048_div_18(const sp_digit* a, const sp_digit* d, sp_digit* m,
         sp_2048_mul_d_18(t2, d, r1);
         (void)sp_2048_sub_18(t1, t1, t2);
         XMEMCPY(r, t1, sizeof(*r) * 2U * 18U);
-        for (i=0; i<16; i++) {
+        for (i=0; i<17; i++) {
             r[i+1] += r[i] >> 57;
             r[i] &= 0x1ffffffffffffffL;
         }
@@ -1638,7 +1638,7 @@ static int sp_2048_mod_exp_18(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
     sp_digit* td;
 #else
-    sp_digit td[36];
+    sp_digit td[3 * 36];
 #endif
     sp_digit* t[3];
     sp_digit* norm;
@@ -1662,7 +1662,7 @@ static int sp_2048_mod_exp_18(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
             t[i] = td + (i * 18 * 2);
 #else
-            t[i] = &td[i * 18 * 2)];
+            t[i] = &td[i * 18 * 2];
 #endif
         }
 
@@ -2445,7 +2445,7 @@ static int sp_2048_div_36(const sp_digit* a, const sp_digit* d, sp_digit* m,
         sp_2048_mul_d_36(t2, d, r1);
         (void)sp_2048_sub_36(t1, t1, t2);
         XMEMCPY(r, t1, sizeof(*r) * 2U * 36U);
-        for (i=0; i<34; i++) {
+        for (i=0; i<35; i++) {
             r[i+1] += r[i] >> 57;
             r[i] &= 0x1ffffffffffffffL;
         }
@@ -2583,7 +2583,7 @@ static int sp_2048_mod_exp_36(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
     sp_digit* td;
 #else
-    sp_digit td[72];
+    sp_digit td[3 * 72];
 #endif
     sp_digit* t[3];
     sp_digit* norm;
@@ -2607,7 +2607,7 @@ static int sp_2048_mod_exp_36(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
             t[i] = td + (i * 36 * 2);
 #else
-            t[i] = &td[i * 36 * 2)];
+            t[i] = &td[i * 36 * 2];
 #endif
         }
 
@@ -5683,7 +5683,7 @@ static int sp_3072_div_27(const sp_digit* a, const sp_digit* d, sp_digit* m,
         sp_3072_mul_d_27(t2, d, r1);
         (void)sp_3072_sub_27(t1, t1, t2);
         XMEMCPY(r, t1, sizeof(*r) * 2U * 27U);
-        for (i=0; i<25; i++) {
+        for (i=0; i<26; i++) {
             r[i+1] += r[i] >> 57;
             r[i] &= 0x1ffffffffffffffL;
         }
@@ -5819,7 +5819,7 @@ static int sp_3072_mod_exp_27(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
     sp_digit* td;
 #else
-    sp_digit td[54];
+    sp_digit td[3 * 54];
 #endif
     sp_digit* t[3];
     sp_digit* norm;
@@ -5843,7 +5843,7 @@ static int sp_3072_mod_exp_27(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
             t[i] = td + (i * 27 * 2);
 #else
-            t[i] = &td[i * 27 * 2)];
+            t[i] = &td[i * 27 * 2];
 #endif
         }
 
@@ -6596,7 +6596,7 @@ static int sp_3072_div_54(const sp_digit* a, const sp_digit* d, sp_digit* m,
         sp_3072_mul_d_54(t2, d, r1);
         (void)sp_3072_sub_54(t1, t1, t2);
         XMEMCPY(r, t1, sizeof(*r) * 2U * 54U);
-        for (i=0; i<52; i++) {
+        for (i=0; i<53; i++) {
             r[i+1] += r[i] >> 57;
             r[i] &= 0x1ffffffffffffffL;
         }
@@ -6734,7 +6734,7 @@ static int sp_3072_mod_exp_54(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
     sp_digit* td;
 #else
-    sp_digit td[108];
+    sp_digit td[3 * 108];
 #endif
     sp_digit* t[3];
     sp_digit* norm;
@@ -6758,7 +6758,7 @@ static int sp_3072_mod_exp_54(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
             t[i] = td + (i * 54 * 2);
 #else
-            t[i] = &td[i * 54 * 2)];
+            t[i] = &td[i * 54 * 2];
 #endif
         }
 
@@ -9977,7 +9977,7 @@ static int sp_4096_div_39(const sp_digit* a, const sp_digit* d, sp_digit* m,
         sp_4096_mul_d_39(t2, sd, r1);
         sp_4096_sub_39(t1, t1, t2);
         XMEMCPY(r, t1, sizeof(*r) * 2U * 39U);
-        for (i=0; i<37; i++) {
+        for (i=0; i<38; i++) {
             r[i+1] += r[i] >> 53;
             r[i] &= 0x1fffffffffffffL;
         }
@@ -10116,7 +10116,7 @@ static int sp_4096_mod_exp_39(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
     sp_digit* td;
 #else
-    sp_digit td[78];
+    sp_digit td[3 * 78];
 #endif
     sp_digit* t[3];
     sp_digit* norm;
@@ -10140,7 +10140,7 @@ static int sp_4096_mod_exp_39(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
             t[i] = td + (i * 39 * 2);
 #else
-            t[i] = &td[i * 39 * 2)];
+            t[i] = &td[i * 39 * 2];
 #endif
         }
 
@@ -10989,7 +10989,7 @@ static int sp_4096_div_78(const sp_digit* a, const sp_digit* d, sp_digit* m,
         sp_4096_mul_d_78(t2, sd, r1);
         sp_4096_sub_78(t1, t1, t2);
         XMEMCPY(r, t1, sizeof(*r) * 2U * 78U);
-        for (i=0; i<76; i++) {
+        for (i=0; i<77; i++) {
             r[i+1] += r[i] >> 53;
             r[i] &= 0x1fffffffffffffL;
         }
@@ -11130,7 +11130,7 @@ static int sp_4096_mod_exp_78(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
     sp_digit* td;
 #else
-    sp_digit td[156];
+    sp_digit td[3 * 156];
 #endif
     sp_digit* t[3];
     sp_digit* norm;
@@ -11154,7 +11154,7 @@ static int sp_4096_mod_exp_78(sp_digit* r, const sp_digit* a, const sp_digit* e,
 #if defined(WOLFSSL_SMALL_STACK) && !defined(WOLFSSL_SP_NO_MALLOC)
             t[i] = td + (i * 78 * 2);
 #else
-            t[i] = &td[i * 78 * 2)];
+            t[i] = &td[i * 78 * 2];
 #endif
         }
 
@@ -16535,7 +16535,7 @@ static int sp_256_div_5(const sp_digit* a, const sp_digit* d, sp_digit* m,
         sp_256_mul_d_5(t2, d, r1);
         (void)sp_256_sub_5(t1, t1, t2);
         XMEMCPY(r, t1, sizeof(*r) * 2U * 5U);
-        for (i=0; i<3; i++) {
+        for (i=0; i<4; i++) {
             r[i+1] += r[i] >> 52;
             r[i] &= 0xfffffffffffffL;
         }
@@ -22251,7 +22251,7 @@ static int sp_384_div_7(const sp_digit* a, const sp_digit* d, sp_digit* m,
         sp_384_mul_d_7(t2, d, r1);
         (void)sp_384_sub_7(t1, t1, t2);
         XMEMCPY(r, t1, sizeof(*r) * 2U * 7U);
-        for (i=0; i<5; i++) {
+        for (i=0; i<6; i++) {
             r[i+1] += r[i] >> 55;
             r[i] &= 0x7fffffffffffffL;
         }
