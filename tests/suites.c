@@ -455,6 +455,7 @@ static int execute_test_case(int svr_argc, char** svr_argv,
         return NOT_BUILT_IN;
     }
     printf("trying client command line[%d]: %s\n", tests, commandLine);
+    tests++;
 
     /* determine based on args if this test is expected to fail */
     if (XSTRSTR(commandLine, exitWithRetFlag) != NULL) {
@@ -833,9 +834,18 @@ int SuiteTest(int argc, char** argv)
         args.return_code = EXIT_FAILURE;
         goto exit;
     }
-    /* add dtls grouping suites */
+    /* add dtls grouping tests */
     strcpy(argv0[1], "tests/test-dtls-group.conf");
     printf("starting dtls message grouping tests\n");
+    test_harness(&args);
+    if (args.return_code != 0) {
+        printf("error from script %d\n", args.return_code);
+        args.return_code = EXIT_FAILURE;
+        goto exit;
+    }
+    /* add dtls session resumption tests */
+    strcpy(argv0[1], "tests/test-dtls-resume.conf");
+    printf("starting dtls session resumption tests\n");
     test_harness(&args);
     if (args.return_code != 0) {
         printf("error from script %d\n", args.return_code);
@@ -871,6 +881,20 @@ int SuiteTest(int argc, char** argv)
         args.return_code = EXIT_FAILURE;
         goto exit;
     }
+#endif
+#ifndef WOLFSSL_NO_DTLS_SIZE_CHECK
+    /* failure tests */
+    args.argc = 3;
+    strcpy(argv0[1], "tests/test-dtls-fails.conf");
+    strcpy(argv0[2], "expFail"); /* tests are expected to fail */
+    printf("starting dtls tests that expect failure\n");
+    test_harness(&args);
+    if (args.return_code != 0) {
+        printf("error from script %d\n", args.return_code);
+        args.return_code = EXIT_FAILURE;
+        goto exit;
+    }
+    strcpy(argv0[2], "");
 #endif
 #endif
 #ifdef WOLFSSL_SCTP
@@ -1029,7 +1053,7 @@ int SuiteTest(int argc, char** argv)
     args.argc = 3;
     strcpy(argv0[1], "tests/test-dhprime.conf");
     strcpy(argv0[2], "doDH"); /* add DH prime flag */
-    printf("starting tests that expect failure\n");
+    printf("starting dh prime tests\n");
     test_harness(&args);
     if (args.return_code != 0) {
         printf("error from script %d\n", args.return_code);

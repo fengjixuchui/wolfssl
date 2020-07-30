@@ -3311,9 +3311,9 @@ int fp_is_bit_set (fp_int *a, fp_digit b)
     fp_digit i;
 
     if (b > FP_MAX_BITS)
-        return 0;
-    else
-        i = b/DIGIT_BIT;
+        return FP_VAL;
+
+    i = b/DIGIT_BIT;
 
     if ((fp_digit)a->used < i)
         return 0;
@@ -3327,9 +3327,9 @@ int fp_set_bit (fp_int * a, fp_digit b)
     fp_digit i;
 
     if (b > FP_MAX_BITS)
-        return 0;
-    else
-        i = b/DIGIT_BIT;
+        return FP_VAL;
+
+    i = b/DIGIT_BIT;
 
     /* set the used count of where the bit will go if required */
     if (a->used < (int)(i+1))
@@ -3415,6 +3415,17 @@ void fp_rshb(fp_int *c, int x)
     fp_digit r, rr;
     fp_digit D = x;
 
+    /* shifting by a negative number not supported */
+    if (x < 0) return;
+
+    /* shift digits first if needed */
+    if (x >= DIGIT_BIT) {
+        fp_rshd(c, x / DIGIT_BIT);
+        /* recalculate number of bits to shift */
+        D = x % DIGIT_BIT;
+    }
+
+    /* zero shifted is always zero */
     if (fp_iszero(c)) return;
 
     /* mask */

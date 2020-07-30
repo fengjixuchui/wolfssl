@@ -381,6 +381,10 @@ int ServerEchoData(SSL* ssl, int clientfd, int echoData, int block,
                         err_sys_ex(runWithErrors, "SSL_read failed");
                         break;
                     }
+                    if (err == WOLFSSL_ERROR_ZERO_RETURN) {
+                        free(buffer);
+                        return WOLFSSL_ERROR_ZERO_RETURN;
+                    }
                 }
                 else {
                     rx_pos += ret;
@@ -438,7 +442,7 @@ int ServerEchoData(SSL* ssl, int clientfd, int echoData, int block,
         );
     }
 
-    return EXIT_SUCCESS;
+    return 0;
 }
 
 static void ServerRead(WOLFSSL* ssl, char* input, int inputLen)
@@ -1018,7 +1022,7 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
     #if (defined(HAVE_ECC) && !defined(ALT_ECC_SIZE)) \
         || defined(SESSION_CERTS)
         /* big enough to handle most cases including session certs */
-        byte memory[220000];
+        byte memory[239936];
     #else
         byte memory[80000];
     #endif
@@ -1097,6 +1101,10 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
 #ifdef WOLFSSL_VXWORKS
     useAnyAddr = 1;
 #else
+
+    /* Reinitialize the global myVerifyAction. */
+    myVerifyAction = VERIFY_OVERRIDE_ERROR;
+
     /* Not Used: h, z, F, T, V, W, X */
     while ((ch = mygetopt(argc, argv, "?:"
                 "abc:defgijk:l:mnop:q:rstuv:wxy"
@@ -1646,6 +1654,25 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
     wolfSSL_CTX_set_TicketEncCb(ctx, myTicketEncCb);
 #endif
 
+#if defined(WOLFSSL_SNIFFER) && defined(WOLFSSL_STATIC_EPHEMERAL)
+    /* used for testing only to set a static/fixed ephemeral key 
+        for use with the sniffer */
+#if defined(HAVE_ECC) && !defined(NO_ECC_SECP) && \
+        (!defined(NO_ECC256) || defined(HAVE_ALL_CURVES))
+    ret = wolfSSL_CTX_set_ephemeral_key(ctx, WC_PK_TYPE_ECDH,
+        "./certs/statickeys/ecc-secp256r1.pem", 0, WOLFSSL_FILETYPE_PEM);
+    if (ret != 0) {
+        err_sys_ex(runWithErrors, "error loading static ECDH key");
+    }
+#elif !defined(NO_DH)
+    ret = wolfSSL_CTX_set_ephemeral_key(ctx, WC_PK_TYPE_DH,
+        "./certs/statickeys/dh-ffdhe2048.pem", 0, WOLFSSL_FILETYPE_PEM);
+    if (ret != 0) {
+        err_sys_ex(runWithErrors, "error loading static DH key");
+    }
+#endif
+#endif /* WOLFSSL_SNIFFER && WOLFSSL_STATIC_EPHEMERAL */
+
     if (cipherList && !useDefCipherList) {
         if (SSL_CTX_set_cipher_list(ctx, cipherList) != WOLFSSL_SUCCESS)
             err_sys_ex(runWithErrors, "server can't set custom cipher list");
@@ -1807,7 +1834,8 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
         SSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER |
                             (usePskPlus ? WOLFSSL_VERIFY_FAIL_EXCEPT_PSK :
                                 WOLFSSL_VERIFY_FAIL_IF_NO_PEER_CERT),
-                  myVerifyAction == VERIFY_OVERRIDE_DATE_ERR ? myVerify : NULL);
+                  (myVerifyAction == VERIFY_OVERRIDE_DATE_ERR ||
+                   myVerifyAction == VERIFY_FORCE_FAIL) ? myVerify : NULL);
 
     #ifdef TEST_BEFORE_DATE
         verify_flags |= WOLFSSL_LOAD_FLAG_DATE_ERR_OKAY;
@@ -1830,11 +1858,13 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
    }
 #endif
 
-#if defined(WOLFSSL_SNIFFER)
-    /* don't use EDH, can't sniff tmp keys */
+#ifdef WOLFSSL_SNIFFER
     if (cipherList == NULL && version < 4) {
-        if (SSL_CTX_set_cipher_list(ctx, "AES128-SHA") != WOLFSSL_SUCCESS)
+        /* static RSA or static ECC cipher suites */
+        const char* staticCipherList = "AES128-SHA:ECDH-ECDSA-AES128-SHA";
+        if (SSL_CTX_set_cipher_list(ctx, staticCipherList) != WOLFSSL_SUCCESS) {
             err_sys_ex(runWithErrors, "server can't set cipher list 3");
+        }
     }
 #endif
 
@@ -2141,6 +2171,10 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
                        dtlsUDP, dtlsSCTP, serverReadyFile ? 1 : 0, doListen);
         doListen = 0; /* Don't listen next time */
 
+        if (port == 0) {
+            port = readySignal->port;
+        }
+
         if (SSL_set_fd(ssl, clientfd) != WOLFSSL_SUCCESS) {
             err_sys_ex(catastrophic, "error in setting fd");
         }
@@ -2442,7 +2476,15 @@ THREAD_RETURN WOLFSSL_THREAD server_test(void* args)
 #endif
         }
         else if (err == 0 || err == WOLFSSL_ERROR_ZERO_RETURN) {
-            ServerEchoData(ssl, clientfd, echoData, block, throughput);
+            err = ServerEchoData(ssl, clientfd, echoData, block, throughput);
+            if (err != 0) {
+                SSL_free(ssl); ssl = NULL;
+                SSL_CTX_free(ctx); ctx = NULL;
+                CloseSocket(clientfd);
+                CloseSocket(sockfd);
+                ((func_args*)args)->return_code = err;
+                goto exit;
+            }
         }
 
 #if defined(WOLFSSL_MDK_SHELL) && defined(HAVE_MDK_RTX)

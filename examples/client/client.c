@@ -65,6 +65,15 @@
 #define OCSP_STAPLINGV2_MULTI 3
 #define OCSP_STAPLING_OPT_MAX OCSP_STAPLINGV2_MULTI
 
+#if defined(XSLEEP_US) && defined(NO_MAIN_DRIVER)
+    /* This is to force the server's thread to get a chance to
+     * execute before continuing the resume in non-blocking
+     * DTLS test cases. */
+    #define TEST_DELAY() XSLEEP_US(10000)
+#else
+    #define TEST_DELAY() XSLEEP_MS(1000)
+#endif
+
 /* Note on using port 0: the client standalone example doesn't utilize the
  * port 0 port sharing; that is used by (1) the server in external control
  * test mode and (2) the testsuite which uses this code and sets up the correct
@@ -230,10 +239,11 @@ static void ShowVersions(void)
 }
 
 #ifdef WOLFSSL_TLS13
+#define MAX_GROUP_NUMBER 4
 static void SetKeyShare(WOLFSSL* ssl, int onlyKeyShare, int useX25519,
                         int useX448)
 {
-    int groups[3] = {0};
+    int groups[MAX_GROUP_NUMBER] = {0};
     int count = 0;
 
     (void)useX25519;
@@ -277,6 +287,8 @@ static void SetKeyShare(WOLFSSL* ssl, int onlyKeyShare, int useX25519,
     #endif
     }
 
+    if (count >= MAX_GROUP_NUMBER)
+        err_sys("example group array size error");
     if (wolfSSL_set_groups(ssl, groups, count) != WOLFSSL_SUCCESS)
         err_sys("unable to set groups");
     WOLFSSL_END(WC_FUNC_CLIENT_KEY_EXCHANGE_SEND);
@@ -483,7 +495,7 @@ static int ClientBenchmarkConnections(WOLFSSL_CTX* ctx, char* host, word16 port,
 /* Measures throughput in kbps. Throughput = number of bytes */
 static int ClientBenchmarkThroughput(WOLFSSL_CTX* ctx, char* host, word16 port,
     int dtlsUDP, int dtlsSCTP, int block, size_t throughput, int useX25519,
-    int useX448)
+    int useX448, int exitWithRet)
 {
     double start, conn_time = 0, tx_time = 0, rx_time = 0;
     SOCKET_T sockfd;
@@ -588,7 +600,9 @@ static int ClientBenchmarkThroughput(WOLFSSL_CTX* ctx, char* host, word16 port,
                     } while (err == WC_PENDING_E);
                     if (ret != len) {
                         printf("SSL_write bench error %d!\n", err);
-                        err_sys("SSL_write failed");
+                        if (!exitWithRet)
+                            err_sys("SSL_write failed");
+                        goto doExit;
                     }
                     tx_time += current_time(0) - start;
 
@@ -642,6 +656,7 @@ static int ClientBenchmarkThroughput(WOLFSSL_CTX* ctx, char* host, word16 port,
         else {
             err_sys("Client buffer malloc failed");
         }
+doExit:
         if(tx_buffer) XFREE(tx_buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
         if(rx_buffer) XFREE(rx_buffer, NULL, DYNAMIC_TYPE_TMP_BUFFER);
     }
@@ -652,6 +667,9 @@ static int ClientBenchmarkThroughput(WOLFSSL_CTX* ctx, char* host, word16 port,
     wolfSSL_shutdown(ssl);
     wolfSSL_free(ssl); ssl = NULL;
     CloseSocket(sockfd);
+
+    if (exitWithRet)
+        return err;
 
 #if !defined(__MINGW32__)
     printf("wolfSSL Client Benchmark %zu bytes\n"
@@ -728,7 +746,7 @@ static int StartTLS_Init(SOCKET_T* sockfd)
     XMEMSET(tmpBuf, 0, sizeof(tmpBuf));
     if (recv(*sockfd, tmpBuf, sizeof(tmpBuf)-1, 0) < 0)
         err_sys("failed to read STARTTLS command\n");
-
+    tmpBuf[sizeof(tmpBuf)-1] = '\0';
     if (!XSTRNCMP(tmpBuf, starttlsCmd[4], XSTRLEN(starttlsCmd[4]))) {
         printf("%s\n", tmpBuf);
     } else {
@@ -1592,6 +1610,9 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 
     StackTrap();
 
+    /* Reinitialize the global myVerifyAction. */
+    myVerifyAction = VERIFY_OVERRIDE_ERROR;
+
 #ifndef WOLFSSL_VXWORKS
     /* Not used: All used */
     while ((ch = mygetopt(argc, argv, "?:"
@@ -2375,10 +2396,11 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     wolfSSL_CTX_set_default_passwd_cb(ctx, PasswordCallBack);
 #endif
 
-#if defined(WOLFSSL_SNIFFER)
+#ifdef WOLFSSL_SNIFFER
     if (cipherList == NULL && version < 4) {
-        /* don't use EDH, can't sniff tmp keys */
-        if (wolfSSL_CTX_set_cipher_list(ctx, "AES128-SHA") != WOLFSSL_SUCCESS) {
+        /* static RSA or ECC cipher suites */
+        const char* staticCipherList = "AES128-SHA:ECDH-ECDSA-AES128-SHA";
+        if (wolfSSL_CTX_set_cipher_list(ctx, staticCipherList) != WOLFSSL_SUCCESS) {
             wolfSSL_CTX_free(ctx); ctx = NULL;
             err_sys("client can't set cipher list 3");
         }
@@ -2610,9 +2632,13 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     if (throughput) {
         ((func_args*)args)->return_code =
             ClientBenchmarkThroughput(ctx, host, port, dtlsUDP, dtlsSCTP,
-                                      block, throughput, useX25519, useX448);
+                                      block, throughput, useX25519, useX448,
+                                      exitWithRet);
         wolfSSL_CTX_free(ctx); ctx = NULL;
-        XEXIT_T(EXIT_SUCCESS);
+        if (!exitWithRet)
+            XEXIT_T(EXIT_SUCCESS);
+        else
+            goto exit;
     }
 
     #if defined(WOLFSSL_MDK_ARM)
@@ -3132,13 +3158,7 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 
 /* allow some time for exporting the session */
 #ifdef WOLFSSL_SESSION_EXPORT_DEBUG
-#ifdef USE_WINDOWS_API
-    Sleep(500);
-#elif defined(WOLFSSL_TIRTOS)
-    Task_sleep(1);
-#else
-    sleep(1);
-#endif
+    TEST_DELAY();
 #endif /* WOLFSSL_SESSION_EXPORT_DEBUG */
 
 #ifdef WOLFSSL_TLS13
@@ -3149,12 +3169,16 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
     err = ClientWrite(ssl, msg, msgSz, "", exitWithRet);
     if (exitWithRet && (err != 0)) {
         ((func_args*)args)->return_code = err;
+        wolfSSL_free(ssl); ssl = NULL;
+        wolfSSL_CTX_free(ctx); ctx = NULL;
         goto exit;
     }
 
     err = ClientRead(ssl, reply, sizeof(reply)-1, 1, "", exitWithRet);
     if (exitWithRet && (err != 0)) {
         ((func_args*)args)->return_code = err;
+        wolfSSL_free(ssl); ssl = NULL;
+        wolfSSL_CTX_free(ctx); ctx = NULL;
         goto exit;
     }
 
@@ -3237,13 +3261,7 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 #endif
 
         if (dtlsUDP) {
-#ifdef USE_WINDOWS_API
-            Sleep(500);
-#elif defined(WOLFSSL_TIRTOS)
-            Task_sleep(1);
-#else
-            sleep(1);
-#endif
+            TEST_DELAY();
         }
         tcp_connect(&sockfd, host, port, dtlsUDP, dtlsSCTP, sslResume);
         if (wolfSSL_set_fd(sslResume, sockfd) != WOLFSSL_SUCCESS) {
@@ -3365,13 +3383,7 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 
     /* allow some time for exporting the session */
     #ifdef WOLFSSL_SESSION_EXPORT_DEBUG
-        #ifdef USE_WINDOWS_API
-            Sleep(500);
-        #elif defined(WOLFSSL_TIRTOS)
-            Task_sleep(1);
-        #else
-            sleep(1);
-        #endif
+        TEST_DELAY();
     #endif /* WOLFSSL_SESSION_EXPORT_DEBUG */
 
 #ifdef HAVE_SECURE_RENEGOTIATION
@@ -3416,8 +3428,6 @@ THREAD_RETURN WOLFSSL_THREAD client_test(void* args)
 
         (void)ClientRead(sslResume, reply, sizeof(reply)-1, sendGET,
                          "Server resume: ", 0);
-        /* try to send session break */
-        (void)ClientWrite(sslResume, msg, msgSz, " resume 2", 0);
 
         ret = wolfSSL_shutdown(sslResume);
         if (wc_shutdown && ret == WOLFSSL_SHUTDOWN_NOT_DONE)

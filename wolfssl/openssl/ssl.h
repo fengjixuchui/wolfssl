@@ -302,6 +302,7 @@ typedef STACK_OF(ACCESS_DESCRIPTION) AUTHORITY_INFO_ACCESS;
 #define SSL_set_connect_state           wolfSSL_set_connect_state
 #define SSL_set_accept_state            wolfSSL_set_accept_state
 #define SSL_session_reused              wolfSSL_session_reused
+#define SSL_SESSION_up_ref              wolfSSL_SESSION_up_ref
 #define SSL_SESSION_dup                 wolfSSL_SESSION_dup
 #define SSL_SESSION_free                wolfSSL_SESSION_free
 #define SSL_is_init_finished            wolfSSL_is_init_finished
@@ -410,6 +411,7 @@ typedef STACK_OF(ACCESS_DESCRIPTION) AUTHORITY_INFO_ACCESS;
 #define X509_check_private_key          wolfSSL_X509_check_private_key
 #define X509_check_ca                   wolfSSL_X509_check_ca
 #define X509_check_host                 wolfSSL_X509_check_host
+#define X509_check_ip_asc               wolfSSL_X509_check_ip_asc
 #define X509_email_free                 wolfSSL_X509_email_free
 #define X509_check_issued               wolfSSL_X509_check_issued
 #define X509_dup                        wolfSSL_X509_dup
