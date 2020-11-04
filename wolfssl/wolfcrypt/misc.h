@@ -18,9 +18,13 @@
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1335, USA
  */
+/*
 
+DESCRIPTION
+This module implements the arithmetic-shift right, left, byte swapping, XOR,
+masking and clearing memory logic.
 
-
+*/
 #ifndef WOLF_CRYPT_MISC_H
 #define WOLF_CRYPT_MISC_H
 
@@ -38,6 +42,13 @@ WOLFSSL_LOCAL
 word32 rotlFixed(word32, word32);
 WOLFSSL_LOCAL
 word32 rotrFixed(word32, word32);
+
+#ifdef WC_RC2
+WOLFSSL_LOCAL
+word16 rotlFixed16(word16, word16);
+WOLFSSL_LOCAL
+word16 rotrFixed16(word16, word16);
+#endif
 
 WOLFSSL_LOCAL
 word32 ByteReverseWord32(word32);
