@@ -1692,6 +1692,11 @@ WOLFSSL_LOCAL int  CompleteServerHello(WOLFSSL *ssl);
 WOLFSSL_LOCAL int  CheckVersion(WOLFSSL *ssl, ProtocolVersion pv);
 WOLFSSL_LOCAL int  PickHashSigAlgo(WOLFSSL* ssl, const byte* hashSigAlgo,
                                    word32 hashSigAlgoSz);
+#ifdef WOLF_CRYPTO_CB
+WOLFSSL_LOCAL int  CreateDevPrivateKey(void** pkey, byte* buffer, word32 length,
+                                       int hsType, int label, int id,
+                                       void* heap, int devId);
+#endif
 WOLFSSL_LOCAL int  DecodePrivateKey(WOLFSSL *ssl, word16* length);
 #ifdef HAVE_PK_CALLBACKS
 WOLFSSL_LOCAL int GetPrivateKeySigSize(WOLFSSL* ssl);
@@ -1713,8 +1718,10 @@ WOLFSSL_LOCAL int  HashOutput(WOLFSSL* ssl, const byte* output, int sz,
                               int ivSz);
 WOLFSSL_LOCAL int  HashInput(WOLFSSL* ssl, const byte* input, int sz);
 
-#if defined(OPENSSL_ALL) || defined(HAVE_STUNNEL) || defined(WOLFSSL_NGINX) || defined(WOLFSSL_HAPROXY)
+#ifdef HAVE_SNI
+#ifndef NO_WOLFSSL_SERVER
 WOLFSSL_LOCAL int SNI_Callback(WOLFSSL* ssl);
+#endif
 #endif
 #ifdef WOLFSSL_TLS13
 WOLFSSL_LOCAL int  DecryptTls13(WOLFSSL* ssl, byte* output, const byte* input,
@@ -1727,6 +1734,7 @@ WOLFSSL_LOCAL int  DoTls13HandShakeMsg(WOLFSSL* ssl, byte* input,
 WOLFSSL_LOCAL int DoTls13ServerHello(WOLFSSL* ssl, const byte* input,
                                      word32* inOutIdx, word32 helloSz,
                                      byte* extMsgType);
+WOLFSSL_LOCAL int RestartHandshakeHash(WOLFSSL* ssl);
 #endif
 int TimingPadVerify(WOLFSSL* ssl, const byte* input, int padLen, int t,
                     int pLen, int content);
@@ -2162,14 +2170,16 @@ typedef struct Keys {
 #ifdef HAVE_TLS_EXTENSIONS
 
 typedef enum {
+#ifdef HAVE_SNI
     TLSX_SERVER_NAME                = 0x0000, /* a.k.a. SNI  */
+#endif
     TLSX_MAX_FRAGMENT_LENGTH        = 0x0001,
     TLSX_TRUSTED_CA_KEYS            = 0x0003,
     TLSX_TRUNCATED_HMAC             = 0x0004,
     TLSX_STATUS_REQUEST             = 0x0005, /* a.k.a. OCSP stapling   */
     TLSX_SUPPORTED_GROUPS           = 0x000a, /* a.k.a. Supported Curves */
     TLSX_EC_POINT_FORMATS           = 0x000b,
-#if !defined(WOLFSSL_NO_SIGALG)
+#if !defined(NO_CERTS) && !defined(WOLFSSL_NO_SIGALG)
     TLSX_SIGNATURE_ALGORITHMS       = 0x000d, /* HELLO_EXT_SIG_ALGO */
 #endif
     TLSX_APPLICATION_LAYER_PROTOCOL = 0x0010, /* a.k.a. ALPN */
@@ -2188,14 +2198,18 @@ typedef enum {
     TLSX_EARLY_DATA                 = 0x002a,
     #endif
     TLSX_SUPPORTED_VERSIONS         = 0x002b,
+    #ifdef WOLFSSL_SEND_HRR_COOKIE
     TLSX_COOKIE                     = 0x002c,
+    #endif
     #if defined(HAVE_SESSION_TICKET) || !defined(NO_PSK)
     TLSX_PSK_KEY_EXCHANGE_MODES     = 0x002d,
     #endif
     #ifdef WOLFSSL_POST_HANDSHAKE_AUTH
     TLSX_POST_HANDSHAKE_AUTH        = 0x0031,
     #endif
+    #if !defined(NO_CERTS) && !defined(WOLFSSL_NO_SIGALG)
     TLSX_SIGNATURE_ALGORITHMS_CERT  = 0x0032,
+    #endif
     TLSX_KEY_SHARE                  = 0x0033,
 #endif
     TLSX_RENEGOTIATION_INFO         = 0xff01
@@ -2624,9 +2638,14 @@ enum SetCBIO {
 #endif
 
 #ifdef WOLFSSL_STATIC_EPHEMERAL
+/* contains static ephemeral keys */
 typedef struct {
-    int keyAlgo;
-    DerBuffer* key;
+#ifndef NO_DH
+    DerBuffer* dhKey;
+#endif
+#ifdef HAVE_ECC
+    DerBuffer* ecKey;
+#endif
 } StaticKeyExchangeInfo_t;
 #endif
 
@@ -2648,7 +2667,7 @@ struct WOLFSSL_CTX {
     DerBuffer*  certificate;
     DerBuffer*  certChain;
                  /* chain after self, in DER, with leading size for each cert */
-    #if defined(OPENSSL_EXTRA) || defined(WOLFSSL_EXTRA)
+    #if defined(OPENSSL_EXTRA) || defined(WOLFSSL_EXTRA) || defined(HAVE_LIGHTY)
     WOLF_STACK_OF(WOLFSSL_X509_NAME)* ca_names;
     #endif
     #if defined(OPENSSL_ALL) || defined(OPENSSL_EXTRA) || \
@@ -2660,8 +2679,9 @@ struct WOLFSSL_CTX {
     int         certChainCnt;
 #endif
     DerBuffer*  privateKey;
-    byte        privateKeyType:7;
+    byte        privateKeyType:6;
     byte        privateKeyId:1;
+    byte        privateKeyLabel:1;
     int         privateKeySz;
     int         privateKeyDevId;
     WOLFSSL_CERT_MANAGER* cm;      /* our cert manager, ctx owns SSL will use */
@@ -2808,13 +2828,11 @@ struct WOLFSSL_CTX {
 #ifdef HAVE_EX_DATA
     WOLFSSL_CRYPTO_EX_DATA ex_data;
 #endif
-#if defined(HAVE_ALPN) && (defined(OPENSSL_ALL) || defined(WOLFSSL_NGINX) || defined(WOLFSSL_HAPROXY))
+#if defined(HAVE_ALPN) && (defined(OPENSSL_ALL) || defined(WOLFSSL_NGINX) || defined(WOLFSSL_HAPROXY) || defined(HAVE_LIGHTY))
     CallbackALPNSelect alpnSelect;
     void*              alpnSelectArg;
 #endif
-#if defined(OPENSSL_ALL) || (defined(OPENSSL_EXTRA) && (defined(HAVE_STUNNEL) || \
-                             defined(WOLFSSL_NGINX) || defined(HAVE_LIGHTY) || \
-                             defined(WOLFSSL_HAPROXY) || defined(WOLFSSL_OPENSSH) ))
+#ifdef HAVE_SNI
     CallbackSniRecv sniRecvCb;
     void*           sniRecvCbArg;
 #endif
@@ -3221,14 +3239,14 @@ struct WOLFSSL_SESSION {
 };
 
 
-WOLFSSL_LOCAL
-WOLFSSL_SESSION* GetSession(WOLFSSL*, byte*, byte);
-WOLFSSL_LOCAL
-int          SetSession(WOLFSSL*, WOLFSSL_SESSION*);
+WOLFSSL_LOCAL WOLFSSL_SESSION* GetSession(WOLFSSL*, byte*, byte);
+WOLFSSL_LOCAL int              SetSession(WOLFSSL*, WOLFSSL_SESSION*);
+WOLFSSL_LOCAL void             FreeSession(WOLFSSL_SESSION*, int);
 
 typedef int (*hmacfp) (WOLFSSL*, byte*, const byte*, word32, int, int, int, int);
 
 #ifndef NO_CLIENT_CACHE
+    WOLFSSL_LOCAL
     WOLFSSL_SESSION* GetSessionClient(WOLFSSL*, const byte*, int);
 #endif
 
@@ -3316,8 +3334,9 @@ typedef struct Buffers {
 #ifndef NO_CERTS
     DerBuffer*      certificate;           /* WOLFSSL_CTX owns, unless we own */
     DerBuffer*      key;                   /* WOLFSSL_CTX owns, unless we own */
-    byte            keyType:7;             /* Type of key: RSA, ECC, Ed25519 */
+    byte            keyType:6;             /* Type of key: RSA, ECC, Ed25519 */
     byte            keyId:1;               /* Key data is an id not data */
+    byte            keyLabel:1;            /* Key data is a label not data */
     int             keySz;                 /* Size of RSA key */
     int             keyDevId;              /* Device Id for key */
     DerBuffer*      certChain;             /* WOLFSSL_CTX owns, unless we own */
@@ -3633,7 +3652,7 @@ struct WOLFSSL_X509_NAME {
     WOLFSSL_X509_NAME_ENTRY entry[MAX_NAME_ENTRIES]; /* all entries i.e. CN */
     WOLFSSL_X509*           x509;   /* x509 that struct belongs to */
 #endif /* OPENSSL_EXTRA */
-#if defined(OPENSSL_ALL) || defined(WOLFSSL_NGINX)
+#if defined(OPENSSL_ALL) || defined(WOLFSSL_NGINX) || defined(HAVE_LIGHTY)
     byte  raw[ASN_NAME_MAX];
     int   rawLen;
 #endif
@@ -4086,6 +4105,9 @@ struct WOLFSSL {
     int             dtls_timeout_init;  /* starting timeout value */
     int             dtls_timeout_max;   /* maximum timeout value */
     int             dtls_timeout;       /* current timeout value, changes */
+#ifndef NO_ASN_TIME
+    word32          dtls_start_timeout;
+#endif /* !NO_ASN_TIME */
     word32          dtls_tx_msg_list_sz;
     word32          dtls_rx_msg_list_sz;
     DtlsMsg*        dtls_tx_msg_list;
@@ -4606,6 +4628,7 @@ typedef struct CipherSuiteInfo {
     byte minor;
     byte major;
 #endif
+    byte flags;
 } CipherSuiteInfo;
 
 WOLFSSL_LOCAL const CipherSuiteInfo* GetCipherNames(void);
@@ -4627,7 +4650,8 @@ WOLFSSL_LOCAL const char* GetCipherNameIana(const byte cipherSuite0, const byte 
 WOLFSSL_LOCAL const char* wolfSSL_get_cipher_name_internal(WOLFSSL* ssl);
 WOLFSSL_LOCAL const char* wolfSSL_get_cipher_name_iana(WOLFSSL* ssl);
 WOLFSSL_LOCAL int GetCipherSuiteFromName(const char* name, byte* cipherSuite0,
-                                         byte* cipherSuite);
+                                         byte* cipherSuite, int* flags);
+
 
 enum encrypt_side {
     ENCRYPT_SIDE_ONLY = 1,

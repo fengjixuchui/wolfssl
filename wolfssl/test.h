@@ -302,12 +302,16 @@
 #if !defined(NO_FILESYSTEM) && defined(WOLFSSL_MAX_STRENGTH)
     #define DEFAULT_MIN_RSAKEY_BITS 2048
 #else
+    #ifndef DEFAULT_MIN_RSAKEY_BITS
     #define DEFAULT_MIN_RSAKEY_BITS 1024
+    #endif
 #endif
 #if !defined(NO_FILESYSTEM) && defined(WOLFSSL_MAX_STRENGTH)
     #define DEFAULT_MIN_ECCKEY_BITS 256
 #else
+    #ifndef DEFAULT_MIN_ECCKEY_BITS
     #define DEFAULT_MIN_ECCKEY_BITS 224
+    #endif
 #endif
 
 /* all certs relative to wolfSSL home directory now */
@@ -1588,8 +1592,7 @@ static WC_INLINE int OCSPIOCb(void* ioCtx, const char* url, int urlSz,
 
 static WC_INLINE void OCSPRespFreeCb(void* ioCtx, unsigned char* response)
 {
-    (void)ioCtx;
-    (void)response;
+    return EmbedOcspRespFree(ioCtx, response);
 }
 #endif
 
@@ -2046,14 +2049,8 @@ struct stack_size_debug_context {
  *
  * enable with
  *
- * CFLAGS='-g -DHAVE_STACK_SIZE_VERBOSE' ./configure --enable-stacksize [...]
+ * ./configure --enable-stacksize=verbose [...]
  */
-
-extern THREAD_LS_T unsigned char *StackSizeCheck_myStack;
-extern THREAD_LS_T size_t StackSizeCheck_stackSize;
-extern THREAD_LS_T size_t StackSizeCheck_stackSizeHWM;
-extern THREAD_LS_T size_t *StackSizeCheck_stackSizeHWM_ptr;
-extern THREAD_LS_T void *StackSizeCheck_stackOffsetPointer;
 
 static void *debug_stack_size_verbose_shim(struct stack_size_debug_context *shim_args) {
   StackSizeCheck_myStack = shim_args->myStack;
@@ -2126,11 +2123,24 @@ int StackSizeHWMReset(void)
 
 #define STACK_SIZE_CHECKPOINT(...) ({  \
     ssize_t HWM = StackSizeHWM_OffsetCorrected();    \
-    int _ret = (__VA_ARGS__); \
-    printf("relative stack used = %ld\n", HWM); \
-    StackSizeHWMReset();               \
-    _ret;                       \
+    __VA_ARGS__;                                     \
+    printf("relative stack used = %ld\n", HWM);      \
+    StackSizeHWMReset();                             \
     })
+
+#define STACK_SIZE_CHECKPOINT_WITH_MAX_CHECK(max, ...) ({  \
+    ssize_t HWM = StackSizeHWM_OffsetCorrected();    \
+    int _ret;                                        \
+    __VA_ARGS__;                                     \
+    printf("relative stack used = %ld\n", HWM);      \
+    _ret = StackSizeHWMReset();                      \
+    if ((max >= 0) && (HWM > (ssize_t)(max))) {      \
+        printf("relative stack usage at %s L%d exceeds designated max %ld.\n", __FILE__, __LINE__, (ssize_t)(max)); \
+        _ret = -1;                                   \
+    }                                                \
+    _ret;                                            \
+    })
+
 
 #ifdef __GNUC__
 #define STACK_SIZE_INIT() (void)StackSizeSetOffset(__FUNCTION__, __builtin_frame_address(0))
@@ -2147,6 +2157,9 @@ static WC_INLINE int StackSizeCheck(func_args* args, thread_func tf)
     size_t         stackSize = 1024*1024;
     pthread_attr_t myAttr;
     pthread_t      threadId;
+#ifdef HAVE_STACK_SIZE_VERBOSE
+    struct stack_size_debug_context shim_args;
+#endif
 
 #ifdef PTHREAD_STACK_MIN
     if (stackSize < PTHREAD_STACK_MIN)
@@ -2169,15 +2182,12 @@ static WC_INLINE int StackSizeCheck(func_args* args, thread_func tf)
 
 #ifdef HAVE_STACK_SIZE_VERBOSE
     StackSizeCheck_stackSizeHWM = 0;
-    {
-      struct stack_size_debug_context shim_args;
-      shim_args.myStack = myStack;
-      shim_args.stackSize = stackSize;
-      shim_args.stackSizeHWM_ptr = &StackSizeCheck_stackSizeHWM;
-      shim_args.fn = tf;
-      shim_args.args = args;
-      ret = pthread_create(&threadId, &myAttr, (thread_func)debug_stack_size_verbose_shim, (void *)&shim_args);
-    }
+    shim_args.myStack = myStack;
+    shim_args.stackSize = stackSize;
+    shim_args.stackSizeHWM_ptr = &StackSizeCheck_stackSizeHWM;
+    shim_args.fn = tf;
+    shim_args.args = args;
+    ret = pthread_create(&threadId, &myAttr, (thread_func)debug_stack_size_verbose_shim, (void *)&shim_args);
 #else
     ret = pthread_create(&threadId, &myAttr, tf, args);
 #endif
@@ -3801,8 +3811,48 @@ static WC_INLINE void SetupPkCallbackContexts(WOLFSSL* ssl, void* myCtx)
 
 #endif /* HAVE_PK_CALLBACKS */
 
+static WC_INLINE int SimulateWantWriteIOSendCb(WOLFSSL *ssl, char *buf, int sz, void *ctx)
+{
+    static int wantWriteFlag = 1;
 
+    int sent;
+    int sd = *(int*)ctx;
 
+    (void)ssl;
+
+    if (!wantWriteFlag)
+    {
+        wantWriteFlag = 1;
+
+        sent = wolfIO_Send(sd, buf, sz, 0);
+        if (sent < 0) {
+            int err = errno;
+
+            if (err == SOCKET_EWOULDBLOCK || err == SOCKET_EAGAIN) {
+                return WOLFSSL_CBIO_ERR_WANT_WRITE;
+            }
+            else if (err == SOCKET_ECONNRESET) {
+                return WOLFSSL_CBIO_ERR_CONN_RST;
+            }
+            else if (err == SOCKET_EINTR) {
+                return WOLFSSL_CBIO_ERR_ISR;
+            }
+            else if (err == SOCKET_EPIPE) {
+                return WOLFSSL_CBIO_ERR_CONN_CLOSE;
+            }
+            else {
+                return WOLFSSL_CBIO_ERR_GENERAL;
+            }
+        }
+
+        return sent;
+    }
+    else
+    {
+        wantWriteFlag = 0;
+        return WOLFSSL_CBIO_ERR_WANT_WRITE;
+    }
+}
 
 #if defined(__hpux__) || defined(__MINGW32__) || defined (WOLFSSL_TIRTOS) \
                       || defined(_MSC_VER)

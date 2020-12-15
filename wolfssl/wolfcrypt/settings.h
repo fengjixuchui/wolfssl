@@ -1070,7 +1070,9 @@ extern void uITRON4_free(void *p) ;
     #define ECC_TIMING_RESISTANT
 
     #undef  HAVE_ECC
+    #ifndef WOLFCRYPT_FIPS_RAND
     #define HAVE_ECC
+    #endif
     #ifndef NO_AES
         #undef  HAVE_AESCCM
         #define HAVE_AESCCM
@@ -1165,7 +1167,9 @@ extern void uITRON4_free(void *p) ;
         #endif
 
         #if defined(FSL_FEATURE_LTC_HAS_PKHA) && FSL_FEATURE_LTC_HAS_PKHA
+            #ifndef WOLFCRYPT_FIPS_RAND
             #define FREESCALE_LTC_ECC
+            #endif
             #define FREESCALE_LTC_TFM
 
             /* the LTC PKHA hardware limit is 2048 bits (256 bytes) for integer arithmetic.
@@ -1387,11 +1391,18 @@ extern void uITRON4_free(void *p) ;
 #ifdef MICRIUM
     #include <stdlib.h>
     #include <os.h>
-    #include <net_cfg.h>
-    #include <net_sock.h>
-    #include <net_err.h>
+    #if defined(RTOS_MODULE_NET_AVAIL) || (APP_CFG_TCPIP_EN == DEF_ENABLED)
+        #include <net_cfg.h>
+        #include <net_sock.h>
+        #if (OS_VERSION < 50000)
+            #include <net_err.h>
+        #endif
+    #endif
     #include <lib_mem.h>
     #include <lib_math.h>
+    #include <lib_str.h>
+    #include  <stdio.h>
+    #include <string.h>
 
     #define USE_FAST_MATH
     #define TFM_TIMING_RESISTANT
@@ -1415,7 +1426,7 @@ extern void uITRON4_free(void *p) ;
     #define NO_WOLFSSL_DIR
     #define NO_WRITEV
 
-    #ifndef CUSTOM_RAND_GENERATE
+    #if ! defined(WOLFSSL_SILABS_SE_ACCEL) && !defined(CUSTOM_RAND_GENERATE)
         #define CUSTOM_RAND_TYPE     RAND_NBR
         #define CUSTOM_RAND_GENERATE Math_Rand
     #endif
@@ -1445,10 +1456,25 @@ extern void uITRON4_free(void *p) ;
                     (CPU_SIZE_T)(size)))
     #define XMEMCPY(pdest, psrc, size) ((void)Mem_Copy((void *)(pdest), \
                      (void *)(psrc), (CPU_SIZE_T)(size)))
-    #define XMEMCMP(pmem_1, pmem_2, size) \
-                   (((CPU_BOOLEAN)Mem_Cmp((void *)(pmem_1), \
-                                          (void *)(pmem_2), \
+
+    #if (OS_VERSION < 50000)
+        #define XMEMCMP(pmem_1, pmem_2, size)                   \
+                   (((CPU_BOOLEAN)Mem_Cmp((void *)(pmem_1),     \
+                                          (void *)(pmem_2),     \
                      (CPU_SIZE_T)(size))) ? DEF_NO : DEF_YES)
+    #else
+      /* Work around for Micrium OS version 5.8 change in behavior
+       * that returns DEF_NO for 0 size compare
+       */
+        #define XMEMCMP(pmem_1, pmem_2, size)                           \
+            (( (size < 1 ) ||                                           \
+               ((CPU_BOOLEAN)Mem_Cmp((void *)(pmem_1),                  \
+                                     (void *)(pmem_2),                  \
+                                     (CPU_SIZE_T)(size)) == DEF_YES))   \
+             ? 0 : 1)
+        #define XSNPRINTF snprintf
+    #endif
+
     #define XMEMMOVE XMEMCPY
 
     #if (OS_CFG_MUTEX_EN == DEF_DISABLED)
@@ -1743,6 +1769,21 @@ extern void uITRON4_free(void *p) ;
 #ifndef ECC_USER_CURVES
     #if !defined(WOLFSSL_SP_MATH) && !defined(HAVE_ALL_CURVES)
         #define HAVE_ALL_CURVES
+    #endif
+#endif
+
+/* The minimum allowed ECC key size */
+/* Note: 224-bits is equivelant to 2048-bit RSA */
+#ifndef ECC_MIN_KEY_SZ
+    #ifdef WOLFSSL_MIN_ECC_BITS
+        #define ECC_MIN_KEY_SZ WOLFSSL_MIN_ECC_BITS
+    #else
+        #if defined(HAVE_FIPS) && defined(HAVE_FIPS_VERSION) && HAVE_FIPS_VERSION >= 2
+            /* FIPSv2 and ready (for now) includes 192-bit support */
+            #define ECC_MIN_KEY_SZ 192
+        #else
+            #define ECC_MIN_KEY_SZ 224
+        #endif
     #endif
 #endif
 
@@ -2118,8 +2159,8 @@ extern void uITRON4_free(void *p) ;
     #ifndef USE_WOLF_STRTOK
         #define USE_WOLF_STRTOK
     #endif
-    #ifndef WOLFSSL_SP_MOD_WORD_RP
-        #define WOLFSSL_SP_MOD_WORD_RP
+    #ifndef WOLFSSL_SP_DIV_WORD_HALF
+        #define WOLFSSL_SP_DIV_WORD_HALF
     #endif
     #ifndef WOLFSSL_OLD_PRIME_CHECK
         #define WOLFSSL_OLD_PRIME_CHECK
@@ -2138,12 +2179,6 @@ extern void uITRON4_free(void *p) ;
     #ifndef WOLFSSL_SP_DIV_WORD_HALF
         #define WOLFSSL_SP_DIV_WORD_HALF
     #endif
-    #ifndef SP_HALF_SIZE
-        #define SP_HALF_SIZE        32
-    #endif
-    #ifndef SP_HALF_MAX
-        #define SP_HALF_MAX         4294967295U
-    #endif
 #endif
 
 
@@ -2154,7 +2189,8 @@ extern void uITRON4_free(void *p) ;
     #undef HAVE_GMTIME_R /* don't trust macro with windows */
 #endif /* WOLFSSL_MYSQL_COMPATIBLE */
 
-#if defined(OPENSSL_ALL) || defined(WOLFSSL_NGINX) || defined(WOLFSSL_HAPROXY)
+#if defined(OPENSSL_ALL) || defined(WOLFSSL_NGINX) || defined(WOLFSSL_HAPROXY) \
+ || defined(HAVE_LIGHTY)
     #define SSL_OP_NO_COMPRESSION    SSL_OP_NO_COMPRESSION
     #define OPENSSL_NO_ENGINE
     #define X509_CHECK_FLAG_ALWAYS_CHECK_SUBJECT
@@ -2175,7 +2211,7 @@ extern void uITRON4_free(void *p) ;
     #endif
 #endif
 
-#if defined(WOLFSSL_NGINX) || defined(WOLFSSL_QT) || defined(OPENSSL_ALL)
+#ifdef HAVE_SNI
     #define SSL_CTRL_SET_TLSEXT_HOSTNAME 55
 #endif
 
@@ -2248,7 +2284,8 @@ extern void uITRON4_free(void *p) ;
 #endif
 
 /* Parts of the openssl compatibility layer require peer certs */
-#if defined(OPENSSL_ALL) || defined(WOLFSSL_NGINX) || defined(WOLFSSL_HAPROXY)
+#if defined(OPENSSL_ALL) || defined(WOLFSSL_NGINX) || defined(WOLFSSL_HAPROXY) \
+ || defined(HAVE_LIGHTY)
     #undef  KEEP_PEER_CERT
     #define KEEP_PEER_CERT
 #endif
@@ -2297,7 +2334,8 @@ extern void uITRON4_free(void *p) ;
 
 #if defined(WOLFCRYPT_ONLY) && defined(NO_AES) && !defined(WOLFSSL_SHA384) && \
     !defined(WOLFSSL_SHA512) && defined(WC_NO_RNG) && \
-                    defined(WOLFSSL_SP_MATH) && defined(WOLFSSL_RSA_PUBLIC_ONLY)
+    (defined(WOLFSSL_SP_MATH) || defined(WOLFSSL_SP_MATH_ALL)) && \
+    defined(WOLFSSL_RSA_PUBLIC_ONLY)
     #undef  WOLFSSL_NO_FORCE_ZERO
     #define WOLFSSL_NO_FORCE_ZERO
 #endif

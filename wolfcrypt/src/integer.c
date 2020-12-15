@@ -562,14 +562,18 @@ void mp_rshb (mp_int *c, int x)
     mp_digit r, rr;
     mp_digit D = x;
 
-    /* shifting by a negative number not supported */
-    if (x < 0) return;
+    /* shifting by a negative number not supported, and shifting by
+     * zero changes nothing.
+     */
+    if (x <= 0) return;
 
     /* shift digits first if needed */
     if (x >= DIGIT_BIT) {
         mp_rshd(c, x / DIGIT_BIT);
         /* recalculate number of bits to shift */
         D = x % DIGIT_BIT;
+        /* check if any more shifting needed */
+        if (D == 0) return;
     }
 
     /* zero shifted is always zero */
@@ -680,8 +684,10 @@ int mp_mod_2d (mp_int * a, int b, mp_int * c)
     c->dp[x] = 0;
   }
   /* clear the digit that is not completely outside/inside the modulus */
-  c->dp[b / DIGIT_BIT] &= (mp_digit) ((((mp_digit) 1) <<
-              (((mp_digit) b) % DIGIT_BIT)) - ((mp_digit) 1));
+  x = DIGIT_BIT - (b % DIGIT_BIT);
+  if (x != DIGIT_BIT) {
+    c->dp[b / DIGIT_BIT] &= ~((mp_digit)0) >> (x + ((sizeof(mp_digit)*8) - DIGIT_BIT));
+  }
   mp_clamp (c);
   return MP_OKAY;
 }
@@ -2479,6 +2485,8 @@ int fast_mp_montgomery_reduce (mp_int * x, mp_int * n, mp_digit rho)
     return MP_MEM;
 #endif
 
+  XMEMSET(W, 0, (n->used * 2 + 1) * sizeof(mp_word));
+
   /* first we have to get the digits of the input into
    * an array of double precision words W[...]
    */
@@ -2495,11 +2503,6 @@ int fast_mp_montgomery_reduce (mp_int * x, mp_int * n, mp_digit rho)
     /* copy the digits of a into W[0..a->used-1] */
     for (ix = 0; ix < x->used; ix++) {
       *_W++ = *tmpx++;
-    }
-
-    /* zero the high words of W[a->used..m->used*2] */
-    for (; ix < n->used * 2 + 1; ix++) {
-      *_W++ = 0;
     }
   }
 
@@ -4699,21 +4702,21 @@ static int mp_prime_miller_rabin (mp_int * a, mp_int * b, int *result)
   }
 #if defined(WOLFSSL_HAVE_SP_RSA) || defined(WOLFSSL_HAVE_SP_DH)
 #ifndef WOLFSSL_SP_NO_2048
-  if (mp_count_bits(a) == 1024)
+  if (mp_count_bits(a) == 1024 && mp_isodd(a))
       err = sp_ModExp_1024(b, &r, a, &y);
-  else if (mp_count_bits(a) == 2048)
+  else if (mp_count_bits(a) == 2048 && mp_isodd(a))
       err = sp_ModExp_2048(b, &r, a, &y);
   else
 #endif
 #ifndef WOLFSSL_SP_NO_3072
-  if (mp_count_bits(a) == 1536)
+  if (mp_count_bits(a) == 1536 && mp_isodd(a))
       err = sp_ModExp_1536(b, &r, a, &y);
-  else if (mp_count_bits(a) == 3072)
+  else if (mp_count_bits(a) == 3072 && mp_isodd(a))
       err = sp_ModExp_3072(b, &r, a, &y);
   else
 #endif
 #ifdef WOLFSSL_SP_4096
-  if (mp_count_bits(a) == 4096)
+  if (mp_count_bits(a) == 4096 && mp_isodd(a))
       err = sp_ModExp_4096(b, &r, a, &y);
   else
 #endif
@@ -5154,8 +5157,8 @@ LBL_U:mp_clear (&u);
     defined(DEBUG_WOLFSSL) || defined(OPENSSL_EXTRA)
 
 /* chars used in radix conversions */
-const char *mp_s_rmap = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ\
-                         abcdefghijklmnopqrstuvwxyz+/";
+const char *mp_s_rmap = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                        "abcdefghijklmnopqrstuvwxyz+/";
 #endif
 
 #if !defined(NO_DSA) || defined(HAVE_ECC)
@@ -5253,7 +5256,12 @@ int mp_radix_size (mp_int *a, int radix, int *size)
     }
 
     if (mp_iszero(a) == MP_YES) {
-        *size = 2;
+#ifndef WC_DISABLE_RADIX_ZERO_PAD
+        if (radix == 16)
+            *size = 3;
+        else
+#endif
+            *size = 2;
         return MP_OKAY;
     }
 
@@ -5310,6 +5318,11 @@ int mp_toradix (mp_int *a, char *str, int radix)
 
     /* quick out if its zero */
     if (mp_iszero(a) == MP_YES) {
+#ifndef WC_DISABLE_RADIX_ZERO_PAD
+        if (radix == 16) {
+            *str++ = '0';
+        }
+#endif
         *str++ = '0';
         *str = '\0';
         return MP_OKAY;

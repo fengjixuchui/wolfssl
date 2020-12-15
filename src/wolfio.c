@@ -107,6 +107,7 @@ static WC_INLINE int wolfSSL_LastError(int err)
 
 
 #ifdef OPENSSL_EXTRA
+#ifndef NO_BIO
 /* Use the WOLFSSL read BIO for receiving data. This is set by the function
  * wolfSSL_set_bio and can also be set by wolfSSL_CTX_SetIORecv.
  *
@@ -208,7 +209,8 @@ int BioSend(WOLFSSL* ssl, char *buf, int sz, void *ctx)
 
     return sent;
 }
-#endif
+#endif /* !NO_BIO */
+#endif /* OPENSSL_EXTRA */
 
 
 #ifdef USE_WOLFSSL_IO
@@ -348,6 +350,17 @@ int EmbedReceiveFrom(WOLFSSL *ssl, char *buf, int sz, void *ctx)
                 WOLFSSL_MSG("setsockopt rcvtimeo failed");
         }
     }
+#ifndef NO_ASN_TIME
+    else if(IsSCR(ssl)) {
+        if (ssl->dtls_start_timeout &&
+                LowResTimer() - ssl->dtls_start_timeout > (word32)dtls_timeout) {
+            return WOLFSSL_CBIO_ERR_TIMEOUT;
+        }
+        else if (!ssl->dtls_start_timeout) {
+            ssl->dtls_start_timeout = LowResTimer();
+        }
+    }
+#endif /* !NO_ASN_TIME */
 
     recvd = (int)RECVFROM_FUNCTION(sd, buf, sz, ssl->rflags,
                                   (SOCKADDR*)&peer, &peerSz);
@@ -393,6 +406,9 @@ int EmbedReceiveFrom(WOLFSSL *ssl, char *buf, int sz, void *ctx)
             return WOLFSSL_CBIO_ERR_WANT_READ;
         }
     }
+#ifndef NO_ASN_TIME
+    ssl->dtls_start_timeout = 0;
+#endif /* !NO_ASN_TIME */
 
     return recvd;
 }
@@ -2075,7 +2091,7 @@ void* mynewt_ctx_new() {
     if(!mynewt_ctx) return NULL;
 
     XMEMSET(mynewt_ctx, 0, sizeof(Mynewt_Ctx));
-    mynewt_ctx->mnMemBuffer = XMALLOC(mempool_bytes, 0, 0);
+    mynewt_ctx->mnMemBuffer = (void *)XMALLOC(mempool_bytes, 0, 0);
     if(!mynewt_ctx->mnMemBuffer) {
         mynewt_ctx_clear((void*)mynewt_ctx);
         return NULL;
