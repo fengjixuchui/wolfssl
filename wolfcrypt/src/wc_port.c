@@ -290,6 +290,19 @@ int wolfCrypt_Init(void)
     return ret;
 }
 
+#ifdef WOLFSSL_TRACK_MEMORY_VERBOSE
+long wolfCrypt_heap_peakAllocs_checkpoint(void) {
+    long ret = ourMemStats.peakAllocsTripOdometer;
+    ourMemStats.peakAllocsTripOdometer = ourMemStats.totalAllocs -
+        ourMemStats.totalDeallocs;
+    return ret;
+}
+long wolfCrypt_heap_peakBytes_checkpoint(void) {
+    long ret = ourMemStats.peakBytesTripOdometer;
+    ourMemStats.peakBytesTripOdometer = ourMemStats.currentBytes;
+    return ret;
+}
+#endif
 
 /* return success value is the same as wolfCrypt_Init */
 int wolfCrypt_Cleanup(void)
@@ -969,6 +982,40 @@ int wolfSSL_CryptHwMutexUnLock(void)
     {
         xSemaphoreGive( *m );
         return 0;
+    }
+
+#elif defined(RTTHREAD)
+
+    int wc_InitMutex(wolfSSL_Mutex* m)
+    {
+        int iReturn;
+
+        *m = ( wolfSSL_Mutex ) rt_mutex_create("mutex",RT_IPC_FLAG_FIFO);
+        if( *m != NULL )
+            iReturn = 0;
+        else
+            iReturn = BAD_MUTEX_E;
+
+
+        return iReturn;
+    }
+
+    int wc_FreeMutex(wolfSSL_Mutex* m)
+    {
+        rt_mutex_delete( *m );
+        return 0;
+    }
+
+
+    int wc_LockMutex(wolfSSL_Mutex* m)
+    {
+        /* Assume an infinite block, or should there be zero block? */
+        return rt_mutex_take( *m, RT_WAITING_FOREVER );
+    }
+
+    int wc_UnLockMutex(wolfSSL_Mutex* m)
+    {
+        return rt_mutex_release( *m );
     }
 
 #elif defined(WOLFSSL_SAFERTOS)
@@ -2416,6 +2463,54 @@ char* mystrnstr(const char* s1, const char* s2, unsigned int n)
     }
 
 #endif /* WOLFSSL_NUCLEUS_1_2 */
+
+#ifdef WOLFSSL_LINUXKM
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+    /* adapted from kvrealloc() draft by Changli Gao, 2010-05-13 */
+    void *lkm_realloc(void *ptr, size_t newsize) {
+        void *nptr;
+        size_t oldsize;
+
+        if (unlikely(newsize == 0)) {
+            kvfree(ptr);
+            return ZERO_SIZE_PTR;
+        }
+
+        if (unlikely(ptr == NULL))
+            return kvmalloc(newsize, GFP_KERNEL);
+
+        if (is_vmalloc_addr(ptr)) {
+            /* no way to discern the size of the old allocation,
+             * because the kernel doesn't export find_vm_area().  if
+             * it did, we could then call get_vm_area_size() on the
+             * returned struct vm_struct.
+             */
+            return NULL;
+        } else {
+            struct page *page;
+
+            page = virt_to_head_page(ptr);
+            if (PageSlab(page) || PageCompound(page)) {
+                if (newsize < PAGE_SIZE)
+                    return krealloc(ptr, newsize, GFP_KERNEL);
+                oldsize = ksize(ptr);
+            } else {
+                oldsize = page->private;
+                if (newsize <= oldsize)
+                    return ptr;
+            }
+	}
+
+	nptr = kvmalloc(newsize, GFP_KERNEL);
+	if (nptr != NULL) {
+            memcpy(nptr, ptr, oldsize);
+            kvfree(ptr);
+	}
+
+	return nptr;
+    }
+#endif /* >= 4.12 */
+#endif /* WOLFSSL_LINUXKM */
 
 #if defined(WOLFSSL_TI_CRYPT) || defined(WOLFSSL_TI_HASH)
     #include <wolfcrypt/src/port/ti/ti-ccm.c>  /* initialize and Mutex for TI Crypt Engine */

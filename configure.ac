@@ -7,7 +7,7 @@
 #
 AC_COPYRIGHT([Copyright (C) 2006-2020 wolfSSL Inc.])
 AC_PREREQ([2.63])
-AC_INIT([wolfssl],[4.5.0],[https://github.com/wolfssl/wolfssl/issues],[wolfssl],[https://www.wolfssl.com])
+AC_INIT([wolfssl],[4.6.0],[https://github.com/wolfssl/wolfssl/issues],[wolfssl],[https://www.wolfssl.com])
 AC_CONFIG_AUX_DIR([build-aux])
 
 # The following sets CFLAGS to empty if unset on command line.  We do not
@@ -34,7 +34,7 @@ LT_PREREQ([2.2])
 LT_INIT([disable-static win32-dll])
 
 #shared library versioning
-WOLFSSL_LIBRARY_VERSION=26:0:2
+WOLFSSL_LIBRARY_VERSION=27:0:3
 #                        | | |
 #                 +------+ | +---+
 #                 |        |     |
@@ -196,7 +196,7 @@ AC_ARG_ENABLE([linuxkm-defaults],
 
 if test "$ENABLED_LINUXKM_DEFAULTS" = "yes"
 then
-    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_DH_CONST -DWOLFSSL_SP_MOD_WORD_RP -DWOLFSSL_OLD_PRIME_CHECK -DWOLFSSL_SP_DIV_64 -DWOLFSSL_SP_DIV_WORD_HALF"
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_DH_CONST -DWOLFSSL_SP_MOD_WORD_RP -DWOLFSSL_OLD_PRIME_CHECK -DWOLFSSL_SP_DIV_64 -DWOLFSSL_SP_DIV_WORD_HALF -DWOLFSSL_SMALL_STACK_STATIC"
 fi
 
 AC_ARG_WITH([linux-source],
@@ -702,6 +702,7 @@ AC_ARG_ENABLE([mcast],
 # signal (--enable-signal)
 # lighty (--enable-lighty) HAVE_LIGHTY
 # stunnel (--enable-stunnel) HAVE_STUNNEL
+# libest (--enable-libest) HAVE_LIBEST
 # asio (--enable-asio) WOLFSSL_ASIO
 # libwebsockets (--enable-libwebsockets) WOLFSSL_LIBWEBSOCKETS
 # qt (--enable-qt) WOLFSSL_QT
@@ -856,7 +857,7 @@ fi
 
 if test "$ENABLED_OPENSSLALL" = "yes"
 then
-AM_CFLAGS="-DOPENSSL_ALL -DWOLFSSL_EITHER_SIDE -DWC_RSA_NO_PADDING -DWC_RSA_PSS $AM_CFLAGS"
+AM_CFLAGS="-DOPENSSL_ALL -DWOLFSSL_EITHER_SIDE -DWC_RSA_NO_PADDING -DWC_RSA_PSS -DWOLFSSL_PSS_LONG_SALT $AM_CFLAGS"
 fi
 
 # OPENSSL Extra Compatibility
@@ -2227,7 +2228,6 @@ then
         AC_MSG_ERROR(stacksize-verbose needs thread-local storage.)
     fi
     AM_CFLAGS="$AM_CFLAGS -DHAVE_STACK_SIZE_VERBOSE"
-    ENABLED_STACKSIZE=yes
 fi
 
 
@@ -2258,13 +2258,17 @@ AC_ARG_ENABLE([trackmemory],
     [ ENABLED_TRACKMEMORY=no ]
     )
 
-if test "$ENABLED_TRACKMEMORY" = "yes"
+if test "$ENABLED_TRACKMEMORY" != "no"
 then
     if test "$ENABLED_MEMORY" = "yes"
     then
         AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_TRACK_MEMORY"
     else
         AC_MSG_ERROR([trackmemory requires using wolfSSL memory (--enable-memory).])
+    fi
+    if test "$ENABLED_TRACKMEMORY" = "verbose"
+    then
+        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_TRACK_MEMORY_VERBOSE"
     fi
 fi
 
@@ -3645,7 +3649,7 @@ fi
 AC_ARG_ENABLE([pkcs7],
     [AS_HELP_STRING([--enable-pkcs7],[Enable PKCS7 (default: disabled)])],
     [ ENABLED_PKCS7=$enableval ],
-    [ ENABLED_PKCS7=no ],
+    [ ENABLED_PKCS7=no ]
     )
 
 
@@ -3655,6 +3659,48 @@ AC_ARG_ENABLE([ssh],
     [ ENABLED_WOLFSSH=$enableval ],
     [ ENABLED_WOLFSSH=no ]
     )
+
+# wolfTPM Options
+AC_ARG_ENABLE([wolftpm],
+    [AS_HELP_STRING([--enable-wolftpm],[Enable wolfTPM options (default: disabled)])],
+    [ ENABLED_WOLFTPM=$enableval ],
+    [ ENABLED_WOLFTPM=no ]
+    )
+
+if test "x$ENABLED_WOLFTPM" = "xyes"
+then
+    # Requires cryptocb (set in its enable section)
+    # Requires certgen, certreq, certext
+    if test "x$ENABLED_CERTGEN" = "xno"
+    then
+        ENABLED_CERTGEN="yes"
+        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_CERT_GEN"
+    fi
+    if test "x$ENABLED_CERTREQ" = "xno"
+    then
+        ENABLED_CERTREQ="yes"
+        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_CERT_REQ"
+    fi
+    if test "x$ENABLED_CERTEXT" = "xno"
+    then
+        ENABLED_CERTEXT="yes"
+        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_CERT_EXT"
+    fi
+
+    # Requires PKCS7
+    if test "x$ENABLED_PKCS7" = "xno"
+    then
+        ENABLED_PKCS7="yes"
+    fi
+
+    # Requires aescfb
+    if test "x$ENABLED_AESCFB" = "xno"
+    then
+        ENABLED_AESCFB="yes"
+        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_AES_CFB"
+    fi
+fi
+
 
 # Simple Certificate Enrollment Protocol (SCEP)
 AC_ARG_ENABLE([scep],
@@ -3963,7 +4009,7 @@ fi
 
 if test "$ENABLED_SIGNAL" = "yes"
 then
-    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_SIGNAL"
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_SIGNAL -DWOLFSSL_AES_COUNTER -DWOLFSSL_AES_DIRECT"
     # Requires opensslextra make sure on
     if test "x$ENABLED_OPENSSLEXTRA" = "xno" && test "x$ENABLED_OPENSSLCOEXIST" = "xno"
     then
@@ -3984,6 +4030,9 @@ then
     AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_ALWAYS_KEEP_SNI"
     AM_CFLAGS="$AM_CFLAGS -DKEEP_OUR_CERT -DKEEP_PEER_CERT"
     AM_CFLAGS="$AM_CFLAGS -DHAVE_EXT_CACHE -DHAVE_EX_DATA"
+
+    ENABLED_CERTGEN="yes"
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_CERT_GEN"
 fi
 
 if test "$ENABLED_OPENSSH" = "yes" || test "$ENABLED_WPAS" = "yes" || test "$ENABLED_QT" = "yes"
@@ -4103,7 +4152,7 @@ then
     # Requires Secure Renegotiation
     if test "x$ENABLED_SECURE_RENEGOTIATION" = "xno"
     then
-        AM_CFLAGS="$AM_CFLAGS -DHAVE_SECURE_RENEGOTIATION -DHAVE_SERVER_RENEGOTIATION_INFO"
+	    AM_CFLAGS="$AM_CFLAGS -DHAVE_TLS_EXTENSIONS -DHAVE_SECURE_RENEGOTIATION -DHAVE_SERVER_RENEGOTIATION_INFO"
     fi
 fi
 
@@ -4238,6 +4287,91 @@ if test "$ENABLED_PSK" = "no" &&  \
     (test "$ENABLED_LEANPSK" = "yes" || test "x$ENABLED_STUNNEL" = "xyes")
 then
     ENABLED_PSK=yes
+fi
+
+# libest Support
+AC_ARG_ENABLE([libest],
+    [AS_HELP_STRING([--enable-libest],[Enable libest (default: disabled)])],
+    [ ENABLED_LIBEST=$enableval ],
+    [ ENABLED_LIBEST=no ]
+    )
+    
+if test "$ENABLED_LIBEST" = "yes"
+then
+    AM_CFLAGS="$AM_CFLAGS -DHAVE_EX_DATA -DHAVE_LIBEST -DWOLFSSL_ALT_NAMES"
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_PSS_SALT_LEN_DISCOVER"
+
+    # Requires opensslextra and opensslall
+    if test "x$ENABLED_OPENSSLALL" = "xno" && test "x$ENABLED_OPENSSLCOEXIST" = "xno"
+    then
+        ENABLED_OPENSSLALL="yes"
+        ENABLED_OPENSSLEXTRA="yes"
+        AM_CFLAGS="-DOPENSSL_EXTRA -DOPENSSL_ALL $AM_CFLAGS"
+        AM_CFLAGS="-DWOLFSSL_EITHER_SIDE -DWC_RSA_NO_PADDING $AM_CFLAGS"
+        AM_CFLAGS="-DWC_RSA_PSS -DWOLFSSL_PSS_LONG_SALT $AM_CFLAGS"
+    fi
+
+    # Requires OCSP
+    if test "x$ENABLED_OCSP" = "xno"
+    then
+        ENABLED_OCSP="yes"
+        AM_CFLAGS="$AM_CFLAGS -DHAVE_OCSP"
+    fi
+    
+    # Requires PKCS7
+    if test "x$ENABLED_PKCS7" = "xno"
+    then
+        ENABLED_PKCS7="yes"
+    fi
+    
+    # Requires Certificate Generation and Request
+    if test "x$ENABLED_CERTGEN" = "xno"
+    then
+        ENABLED_CERTGEN="yes"
+        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_CERT_GEN"
+    fi
+    if test "x$ENABLED_CERTREQ" = "xno"
+    then
+        ENABLED_CERTREQ="yes"
+        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_CERT_REQ"
+    fi
+    if test "x$ENABLED_CERTEXT" = "xno"
+    then
+        ENABLED_CERTEXT="yes"
+        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_CERT_EXT"
+    fi
+    
+    # Requires CRL
+    if test "x$ENABLED_CRL" = "xno"
+    then
+        ENABLED_CRL="yes"
+        AM_CFLAGS="$AM_CFLAGS -DHAVE_CRL"
+    fi
+    
+	if test "x$ENABLED_SRP" = "xno"
+	then
+        ENABLED_SRP="yes"
+	    AM_CFLAGS="$AM_CFLAGS -DWOLFCRYPT_HAVE_SRP"
+	fi
+	
+    # Enable prereqs if not already enabled
+    if test "x$ENABLED_KEYGEN" = "xno"
+    then
+        ENABLED_KEYGEN="yes"
+        AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_KEY_GEN"
+    fi
+    
+    # Requires sessioncerts make sure on
+    if test "x$ENABLED_SESSIONCERTS" = "xno"
+    then
+        ENABLED_SESSIONCERTS="yes"
+        AM_CFLAGS="$AM_CFLAGS -DSESSION_CERTS"
+    fi
+    
+    if test "x$ENABLED_DSA" = "xno"
+    then
+        AC_MSG_WARN([Enabling DSA with --enable-dsa is recommended for libest])
+    fi
 fi
 
 # MD4
@@ -5328,7 +5462,7 @@ AC_ARG_ENABLE([cryptocb],
     [ ENABLED_CRYPTOCB=no ]
     )
 
-if test "x$ENABLED_PKCS11" = "xyes"
+if test "x$ENABLED_PKCS11" = "xyes" || test "x$ENABLED_WOLFTPM" = "xyes"
 then
     ENABLED_CRYPTOCB=yes
 fi
@@ -5838,7 +5972,7 @@ if test "x$ENABLED_LINUXKM" = "xyes"; then
     if test "$ENABLED_SP_MATH" = "no" && test "$ENABLED_SP_MATH_ALL" = "no"; then
         AC_MSG_ERROR([--enable-sp-math or --enable-sp-math-all is required for --enable-linuxkm.])
     fi
-    if test "$ENABLED_STACKSIZE" = "yes"; then
+    if test "$ENABLED_STACKSIZE" != "no"; then
         AC_MSG_ERROR([--enable-stacksize is incompatible with --enable-linuxkm.])
     fi
     if test "$ENABLED_STACKLOG" = "yes"; then
@@ -5973,7 +6107,7 @@ AM_CONDITIONAL([BUILD_NO_LIBRARY],[test "$ENABLED_NO_LIBRARY" = "yes"])
 AM_CONDITIONAL([BUILD_RC2],[test "x$ENABLED_RC2" = "xyes"])
 
 if test "$ax_enable_debug" = "yes" ||
-        test "$ENABLED_STACKSIZE" = "yes" ||
+        test "$ENABLED_STACKSIZE" != "no" ||
         (test "$ENABLED_LEANTLS" = "no" &&
              test "$ENABLED_LEANPSK" = "no" &&
              test "$ENABLED_LOWRESOURCE" = "no")
@@ -6156,6 +6290,7 @@ echo "   * AES-CBC:                    $ENABLED_AESCBC"
 echo "   * AES-GCM:                    $ENABLED_AESGCM"
 echo "   * AES-CCM:                    $ENABLED_AESCCM"
 echo "   * AES-CTR:                    $ENABLED_AESCTR"
+echo "   * AES-CFB:                    $ENABLED_AESCFB"
 echo "   * DES3:                       $ENABLED_DES3"
 echo "   * IDEA:                       $ENABLED_IDEA"
 echo "   * Camellia:                   $ENABLED_CAMELLIA"
@@ -6262,6 +6397,7 @@ echo "   * Fallback SCSV:              $ENABLED_FALLBACK_SCSV"
 echo "   * All TLS Extensions:         $ENABLED_TLSX"
 echo "   * PKCS#7                      $ENABLED_PKCS7"
 echo "   * wolfSSH                     $ENABLED_WOLFSSH"
+echo "   * wolfTPM                     $ENABLED_WOLFTPM"
 echo "   * wolfSCEP                    $ENABLED_WOLFSCEP"
 echo "   * Secure Remote Password      $ENABLED_SRP"
 echo "   * Small Stack:                $ENABLED_SMALL_STACK"
@@ -6271,6 +6407,7 @@ echo "   * LIBZ:                       $ENABLED_LIBZ"
 echo "   * Examples:                   $ENABLED_EXAMPLES"
 echo "   * Crypt tests:                $ENABLED_CRYPT_TESTS"
 echo "   * Stack sizes in tests:       $ENABLED_STACKSIZE"
+echo "   * Heap stats in tests:        $ENABLED_TRACKMEMORY"
 echo "   * User Crypto:                $ENABLED_USER_CRYPTO"
 echo "   * Fast RSA:                   $ENABLED_FAST_RSA"
 echo "   * Single Precision:           $ENABLED_SP"
@@ -6286,7 +6423,7 @@ fi
 echo "   * Async Crypto:               $ENABLED_ASYNCCRYPT"
 echo "   * PKCS#11:                    $ENABLED_PKCS11"
 echo "   * PKCS#12:                    $ENABLED_PKCS12"
-echo "   * Cavium Nitox:               $ENABLED_CAVIUM"
+echo "   * Cavium Nitrox:              $ENABLED_CAVIUM"
 echo "   * Cavium Octeon (Sync):       $ENABLED_OCTEON_SYNC"
 echo "   * Intel Quick Assist:         $ENABLED_INTEL_QA"
 echo "   * ARM ASM:                    $ENABLED_ARMASM"

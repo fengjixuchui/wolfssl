@@ -697,10 +697,18 @@ int mp_mod_2d (mp_int * a, int b, mp_int * c)
 int mp_read_unsigned_bin (mp_int * a, const unsigned char *b, int c)
 {
   int     res;
+  int     digits_needed;
 
-  /* make sure there are at least two digits */
-  if (a->alloc < 2) {
-     if ((res = mp_grow(a, 2)) != MP_OKAY) {
+  while (c > 0 && b[0] == 0) {
+      c--;
+      b++;
+  }
+
+  digits_needed = ((c * CHAR_BIT) + DIGIT_BIT - 1) / DIGIT_BIT;
+
+  /* make sure there are enough digits available */
+  if (a->alloc < digits_needed) {
+     if ((res = mp_grow(a, digits_needed)) != MP_OKAY) {
         return res;
      }
   }
@@ -716,11 +724,13 @@ int mp_read_unsigned_bin (mp_int * a, const unsigned char *b, int c)
 
 #ifndef MP_8BIT
       a->dp[0] |= *b++;
-      a->used += 1;
+      if (a->used == 0)
+          a->used = 1;
 #else
       a->dp[0] = (*b & MP_MASK);
       a->dp[1] |= ((*b++ >> 7U) & 1);
-      a->used += 2;
+      if (a->used == 0)
+          a->used = 2;
 #endif
   }
   mp_clamp (a);
@@ -5246,7 +5256,10 @@ int mp_radix_size (mp_int *a, int radix, int *size)
 
     /* special case for binary */
     if (radix == MP_RADIX_BIN) {
-        *size = mp_count_bits (a) + (a->sign == MP_NEG ? 1 : 0) + 1;
+        *size = mp_count_bits(a);
+        if (*size == 0)
+          *size = 1;
+        *size += (a->sign == MP_NEG ? 1 : 0) + 1; /* "-" sign + null term */
         return MP_OKAY;
     }
 

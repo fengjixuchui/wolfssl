@@ -206,15 +206,21 @@ extern "C" {
 /* Define the types used. */
 #ifdef HAVE___UINT128_T
     #ifdef __SIZEOF_INT128__
-      typedef __uint128_t   sp_uint128;
-      typedef  __int128_t    sp_int128;
-      typedef __uint128_t      uint128_t;
-      typedef  __int128_t       int128_t;
+        typedef __uint128_t   sp_uint128;
+        typedef  __int128_t    sp_int128;
     #else
-      typedef unsigned long sp_uint128   __attribute__ ((mode(TI)));
-      typedef          long  sp_int128   __attribute__ ((mode(TI)));
-      typedef unsigned long    uint128_t __attribute__ ((mode(TI)));
-      typedef          long     int128_t __attribute__ ((mode(TI)));
+        typedef unsigned long sp_uint128   __attribute__ ((mode(TI)));
+        typedef          long  sp_int128   __attribute__ ((mode(TI)));
+    #endif
+    #ifndef WOLFSSL_UINT128_T_DEFINED
+        #ifdef __SIZEOF_INT128__
+          typedef __uint128_t      uint128_t;
+          typedef  __int128_t       int128_t;
+        #else
+          typedef unsigned long    uint128_t __attribute__ ((mode(TI)));
+          typedef          long     int128_t __attribute__ ((mode(TI)));
+        #endif
+        #define WOLFSSL_UINT128_T_DEFINED
     #endif
 #endif
 
@@ -313,9 +319,10 @@ typedef struct sp_ecc_ctx {
     /* Calculate number of digits to have in an sp_int based maximum size of
      * numbers in bits that will be used.
      * Double the size to hold multiplication result.
+     * Add one to accommodate extra digit used by sp_mul(), sp_mulmod(), sp_sqr(), and sp_sqrmod().
      */
     #define SP_INT_DIGITS                                                      \
-        (((SP_INT_BITS + (SP_WORD_SIZE - 1)) * 2 + SP_WORD_SIZE) / SP_WORD_SIZE)
+        ((((SP_INT_BITS + (SP_WORD_SIZE - 1)) * 2 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
 #endif
 
 #ifndef SP_INT_DIGITS
@@ -325,41 +332,41 @@ typedef struct sp_ecc_ctx {
     #if !defined(WOLFSSL_HAVE_SP_RSA) && !defined(WOLFSSL_HAVE_SP_DH) && \
         !defined(WOLFSSL_HAVE_SP_ECC)
         #if !defined(NO_RSA) || !defined(NO_DH) || !defined(NO_DSA)
-            #define SP_INT_DIGITS        ((6144 + SP_WORD_SIZE) / SP_WORD_SIZE)
+            #define SP_INT_DIGITS        (((6144 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #elif defined(HAVE_ECC)
             #define SP_INT_DIGITS   \
-                    ((2 * ( 521 + SP_WORD_SIZE) + SP_WORD_SIZE) / SP_WORD_SIZE)
+                    (((2 * ( 521 + SP_WORD_SIZE) + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #elif !defined(NO_PWDBASED) && defined(WOLFSSL_SHA512)
-            #define SP_INT_DIGITS        (( 512 + SP_WORD_SIZE) / SP_WORD_SIZE)
+            #define SP_INT_DIGITS        ((( 512 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #else
-            #define SP_INT_DIGITS        (( 256 + SP_WORD_SIZE) / SP_WORD_SIZE)
+            #define SP_INT_DIGITS        ((( 256 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #endif
     #elif !defined(WOLFSSL_HAVE_SP_RSA) && !defined(WOLFSSL_HAVE_SP_DH)
         #ifdef WOLFSSL_SP_MATH_ALL
             #define SP_INT_DIGITS   \
-                    ((2 * ( 521 + SP_WORD_SIZE) + SP_WORD_SIZE) / SP_WORD_SIZE)
+                    (((2 * ( 521 + SP_WORD_SIZE) + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #elif defined(WOLFSSL_SP_384)
-            #define SP_INT_DIGITS        (( 768 + SP_WORD_SIZE) / SP_WORD_SIZE)
+            #define SP_INT_DIGITS        ((( 768 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #else
-            #define SP_INT_DIGITS        (( 512 + SP_WORD_SIZE) / SP_WORD_SIZE)
+            #define SP_INT_DIGITS        ((( 512 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #endif
     #elif defined(WOLFSSL_SP_4096)
         #if defined(WOLFSSL_HAVE_SP_DH)
-            #define SP_INT_DIGITS        ((8192 + SP_WORD_SIZE) / SP_WORD_SIZE)
+            #define SP_INT_DIGITS        (((8192 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #else
-            #define SP_INT_DIGITS        ((4096 + SP_WORD_SIZE) / SP_WORD_SIZE)
+            #define SP_INT_DIGITS        (((4096 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #endif
     #elif !defined(WOLFSSL_SP_NO_3072)
         #if defined(WOLFSSL_HAVE_SP_DH)
-            #define SP_INT_DIGITS        ((6144 + SP_WORD_SIZE) / SP_WORD_SIZE)
+            #define SP_INT_DIGITS        (((6144 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #else
-            #define SP_INT_DIGITS        ((3072 + SP_WORD_SIZE) / SP_WORD_SIZE)
+            #define SP_INT_DIGITS        (((3072 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #endif
     #else
         #if defined(WOLFSSL_HAVE_SP_DH)
-            #define SP_INT_DIGITS        ((4096 + SP_WORD_SIZE) / SP_WORD_SIZE)
+            #define SP_INT_DIGITS        (((4096 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #else
-            #define SP_INT_DIGITS        ((2048 + SP_WORD_SIZE) / SP_WORD_SIZE)
+            #define SP_INT_DIGITS        (((2048 + SP_WORD_SIZE) / SP_WORD_SIZE) + 1)
         #endif
     #endif
 #endif

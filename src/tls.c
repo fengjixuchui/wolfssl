@@ -565,7 +565,11 @@ int MakeTlsMasterSecret(WOLFSSL* ssl)
                             ssl->arrays->clientRandom,
                             ssl->arrays->serverRandom,
                             ssl->arrays->tsip_masterSecret);
-            
+
+            #else
+
+            ret = NOT_COMPILED_IN;
+
             #endif
         } else
 #endif
@@ -2976,15 +2980,37 @@ static int TLSX_CSR_Parse(WOLFSSL* ssl, byte* input, word16 length,
                                                                  byte isRequest)
 {
     int ret;
+#if !defined(NO_WOLFSSL_SERVER)
+    byte status_type;
+    word16 size = 0;
+#if defined(WOLFSSL_TLS13)
+    DecodedCert* cert;
+#endif
+#endif
+
+#if !defined(NO_WOLFSSL_CLIENT) || !defined(NO_WOLFSSL_SERVER) \
+    && defined(WOLFSSL_TLS13)
+    OcspRequest* request;
+    TLSX* extension;
+    CertificateStatusRequest* csr;
+#endif
+
+#if !defined(NO_WOLFSSL_CLIENT) && defined(WOLFSSL_TLS13) \
+ || !defined(NO_WOLFSSL_SERVER) 
+    word32 offset = 0;
+#endif
+
+#if !defined(NO_WOLFSSL_CLIENT) && defined(WOLFSSL_TLS13)
+    word32 resp_length;
+#endif
 
     /* shut up compiler warnings */
     (void) ssl; (void) input;
 
     if (!isRequest) {
 #ifndef NO_WOLFSSL_CLIENT
-        TLSX* extension = TLSX_Find(ssl->extensions, TLSX_STATUS_REQUEST);
-        CertificateStatusRequest* csr = extension ?
-                              (CertificateStatusRequest*)extension->data : NULL;
+        extension = TLSX_Find(ssl->extensions, TLSX_STATUS_REQUEST);
+        csr = extension ? (CertificateStatusRequest*)extension->data : NULL;
 
         if (!csr) {
             /* look at context level */
@@ -3005,8 +3031,8 @@ static int TLSX_CSR_Parse(WOLFSSL* ssl, byte* input, word16 length,
                 case WOLFSSL_CSR_OCSP:
                     /* propagate nonce */
                     if (csr->request.ocsp.nonceSz) {
-                        OcspRequest* request =
-                             (OcspRequest*)TLSX_CSR_GetRequest(ssl->extensions);
+                        request = 
+                            (OcspRequest*)TLSX_CSR_GetRequest(ssl->extensions);
 
                         if (request) {
                             XMEMCPY(request->nonce, csr->request.ocsp.nonce,
@@ -3022,9 +3048,6 @@ static int TLSX_CSR_Parse(WOLFSSL* ssl, byte* input, word16 length,
 
     #ifdef WOLFSSL_TLS13
         if (ssl->options.tls1_3) {
-            word32       resp_length;
-            word32       offset = 0;
-
             /* Get the new extension potentially created above. */
             extension = TLSX_Find(ssl->extensions, TLSX_STATUS_REQUEST);
             csr = extension ? (CertificateStatusRequest*)extension->data : NULL;
@@ -3042,12 +3065,10 @@ static int TLSX_CSR_Parse(WOLFSSL* ssl, byte* input, word16 length,
                 if (offset + resp_length != length)
                     ret = BUFFER_ERROR;
             }
-        #if !defined(NO_WOLFSSL_SERVER)
             if (ret == 0) {
                 csr->response.buffer = input + offset;
                 csr->response.length = resp_length;
             }
-        #endif
 
             return ret;
         }
@@ -3061,10 +3082,6 @@ static int TLSX_CSR_Parse(WOLFSSL* ssl, byte* input, word16 length,
     }
     else {
 #ifndef NO_WOLFSSL_SERVER
-        byte   status_type;
-        word16 offset = 0;
-        word16 size = 0;
-
         if (length == 0)
             return 0;
 
@@ -3113,11 +3130,29 @@ static int TLSX_CSR_Parse(WOLFSSL* ssl, byte* input, word16 length,
         if (ret != WOLFSSL_SUCCESS)
             return ret; /* throw error */
 
-    #if defined(WOLFSSL_TLS13) && !defined(NO_WOLFSSL_SERVER)
+    #if defined(WOLFSSL_TLS13)
         if (ssl->options.tls1_3) {
-            OcspRequest* request;
-            TLSX* extension = TLSX_Find(ssl->extensions, TLSX_STATUS_REQUEST);
-            CertificateStatusRequest* csr = extension ?
+            cert = (DecodedCert*)XMALLOC(sizeof(DecodedCert), ssl->heap,
+                                         DYNAMIC_TYPE_DCERT);
+            if (cert == NULL) {
+                return MEMORY_E;
+            }
+            InitDecodedCert(cert, ssl->buffers.certificate->buffer,
+                            ssl->buffers.certificate->length, ssl->heap);
+            ret = ParseCert(cert, CERT_TYPE, 1, ssl->ctx->cm);
+            if (ret != 0 ) {
+                XFREE(cert, ssl->heap, DYNAMIC_TYPE_DCERT);
+                return ret;
+            }
+            ret = TLSX_CSR_InitRequest(ssl->extensions, cert, ssl->heap);
+            if (ret != 0 ) {
+                XFREE(cert, ssl->heap, DYNAMIC_TYPE_DCERT);
+                return ret;
+            }
+            XFREE(cert, ssl->heap, DYNAMIC_TYPE_DCERT);
+
+            extension = TLSX_Find(ssl->extensions, TLSX_STATUS_REQUEST);
+            csr = extension ?
                 (CertificateStatusRequest*)extension->data : NULL;
             if (csr == NULL)
                 return MEMORY_ERROR;
@@ -4072,6 +4107,11 @@ int TLSX_SupportedCurve_CheckPriority(WOLFSSL* ssl)
         return ret;
 
     ext = TLSX_Find(priority, TLSX_SUPPORTED_GROUPS);
+    if (ext == NULL) {
+        WOLFSSL_MSG("Could not find supported groups extension");
+        return 0;
+    }
+
     curve = (SupportedCurve*)ext->data;
     name = curve->name;
 
@@ -9027,18 +9067,18 @@ static int TLSX_EarlyData_GetSize(byte msgType, word16* pSz)
  * Assumes that the the output buffer is big enough to hold data.
  * In messages: ClientHello, EncryptedExtensions and NewSessionTicket.
  *
- * max      The maximum early data size.
+ * maxSz    The maximum early data size.
  * output   The buffer to write into.
  * msgType  The type of the message this extension is being written into.
  * returns the number of bytes written into the buffer.
  */
-static int TLSX_EarlyData_Write(word32 max, byte* output, byte msgType,
+static int TLSX_EarlyData_Write(word32 maxSz, byte* output, byte msgType,
                                 word16* pSz)
 {
     if (msgType == client_hello || msgType == encrypted_extensions)
         return 0;
     else if (msgType == session_ticket) {
-        c32toa(max, output);
+        c32toa(maxSz, output);
         *pSz += OPAQUE32_LEN;
         return 0;
     }
@@ -9095,11 +9135,11 @@ static int TLSX_EarlyData_Parse(WOLFSSL* ssl, byte* input, word16 length,
 
 /* Use the data to create a new Early Data object in the extensions.
  *
- * ssl  The SSL/TLS object.
- * max  The maximum early data size.
+ * ssl    The SSL/TLS object.
+ * maxSz  The maximum early data size.
  * returns 0 on success and other values indicate failure.
  */
-int TLSX_EarlyData_Use(WOLFSSL* ssl, word32 max)
+int TLSX_EarlyData_Use(WOLFSSL* ssl, word32 maxSz)
 {
     int   ret = 0;
     TLSX* extension;
@@ -9118,7 +9158,7 @@ int TLSX_EarlyData_Use(WOLFSSL* ssl, word32 max)
     }
 
     extension->resp = 1;
-    extension->val  = max;
+    extension->val  = maxSz;
 
     return 0;
 }

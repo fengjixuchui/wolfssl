@@ -1779,6 +1779,8 @@ int wc_RsaUnPad_ex(byte* pkcsBlock, word32 pkcsBlockLen, byte** out,
 int wc_hash2mgf(enum wc_HashType hType)
 {
     switch (hType) {
+    case WC_HASH_TYPE_NONE:
+        return WC_MGF1NONE;
     case WC_HASH_TYPE_SHA:
 #ifndef NO_SHA
         return WC_MGF1SHA1;
@@ -1809,7 +1811,6 @@ int wc_hash2mgf(enum wc_HashType hType)
 #else
         break;
 #endif
-    case WC_HASH_TYPE_NONE:
     case WC_HASH_TYPE_MD2:
     case WC_HASH_TYPE_MD4:
     case WC_HASH_TYPE_MD5:
@@ -3158,7 +3159,8 @@ static int RsaPrivateDecryptEx(byte* in, word32 inLen, byte* out,
             defined(HAVE_CAVIUM)
         if (key->asyncDev.marker == WOLFSSL_ASYNC_MARKER_RSA &&
                                                    pad_type != WC_RSA_PSS_PAD) {
-            if (ret > 0) {
+            ret = key->asyncDev.event.ret;
+            if (ret >= 0) {
                 /* convert result */
                 byte* dataLen = (byte*)&key->dataLen;
                 ret = (dataLen[0] << 8) | (dataLen[1]);

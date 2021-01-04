@@ -81,6 +81,7 @@
     _Pragma("GCC diagnostic ignored \"-Wsign-compare\"");
     _Pragma("GCC diagnostic ignored \"-Wpointer-sign\"");
     _Pragma("GCC diagnostic ignored \"-Wbad-function-cast\"");
+    _Pragma("GCC diagnostic ignored \"-Wdiscarded-qualifiers\"");
 
     #include <linux/kconfig.h>
     #include <linux/kernel.h>
@@ -88,6 +89,7 @@
     #include <linux/ctype.h>
     #include <linux/init.h>
     #include <linux/module.h>
+    #include <linux/mm.h>
     #ifndef SINGLE_THREADED
         #include <linux/kthread.h>
     #endif
@@ -155,9 +157,17 @@
      */
     #define _MM_MALLOC_H_INCLUDED
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0)
+    /* kvmalloc()/kvfree() and friends added in linux commit a7c3e901 */
+    #define malloc(x) kvmalloc(x, GFP_KERNEL)
+    #define free(x) kvfree(x)
+    void *lkm_realloc(void *ptr, size_t newsize);
+    #define realloc(x, y) lkm_realloc(x, y)
+#else
     #define malloc(x) kmalloc(x, GFP_KERNEL)
     #define free(x) kfree(x)
     #define realloc(x,y) krealloc(x, y, GFP_KERNEL)
+#endif
 
     /* min() and max() in linux/kernel.h over-aggressively type-check, producing
      * myriad spurious -Werrors throughout the codebase.
@@ -227,6 +237,8 @@
 #elif defined(MICRIUM)
     /* do nothing, just don't pick Unix */
 #elif defined(FREERTOS) || defined(FREERTOS_TCP) || defined(WOLFSSL_SAFERTOS)
+    /* do nothing */
+#elif defined(RTTHREAD)
     /* do nothing */
 #elif defined(EBSNET)
     /* do nothing */
@@ -333,6 +345,9 @@
         #include "FreeRTOS.h"
         #include "semphr.h"
 		typedef SemaphoreHandle_t  wolfSSL_Mutex;
+    #elif defined (RTTHREAD)
+        #include "rtthread.h"
+        typedef rt_mutex_t wolfSSL_Mutex;
     #elif defined(WOLFSSL_SAFERTOS)
         typedef struct wolfSSL_Mutex {
             signed char mutexBuffer[portQUEUE_OVERHEAD_BYTES];
@@ -443,6 +458,11 @@ WOLFSSL_API int wc_SetMutexCb(mutex_cb* cb);
 /* main crypto initialization function */
 WOLFSSL_API int wolfCrypt_Init(void);
 WOLFSSL_API int wolfCrypt_Cleanup(void);
+
+#ifdef WOLFSSL_TRACK_MEMORY_VERBOSE
+    WOLFSSL_API long wolfCrypt_heap_peakAllocs_checkpoint(void);
+    WOLFSSL_API long wolfCrypt_heap_peakBytes_checkpoint(void);
+#endif
 
 
 /* FILESYSTEM SECTION */
@@ -599,6 +619,7 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
     #else
         #define XFOPEN     fopen
     #endif
+    #define XFDOPEN    fdopen
     #define XFSEEK     fseek
     #define XFTELL     ftell
     #define XREWIND    rewind
@@ -614,6 +635,9 @@ WOLFSSL_API int wolfCrypt_Cleanup(void);
         #include <dirent.h>
         #include <unistd.h>
         #include <sys/stat.h>
+        #define XWRITE      write
+        #define XREAD       read
+        #define XCLOSE      close
     #endif
 #endif
 

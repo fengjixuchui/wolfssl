@@ -2338,7 +2338,7 @@ int sp_cond_swap_ct(sp_int * a, sp_int * b, int c, int m)
        return MP_MEM;
 #endif
 
-    t->used = (a->used ^ b->used) & mask;
+    t->used = (int)((a->used ^ b->used) & mask);
     for (i = 0; i < c; i++) {
         t->dp[i] = (a->dp[i] ^ b->dp[i]) & mask;
     }
@@ -4798,8 +4798,8 @@ int sp_mod(sp_int* a, sp_int* m, sp_int* r)
             t->dp[k+1] = (sp_int_digit)h;
             t->used = k + 2;
 
-            sp_clamp(t);
             sp_copy(t, r);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -5002,12 +5002,13 @@ int sp_mod(sp_int* a, sp_int* m, sp_int* r)
             t->dp[5] = l;
             l = h;
             h = o;
+            o = 0;
             SP_ASM_MUL_ADD_NO(l, h, a->dp[3], b->dp[3]);
             t->dp[6] = l;
             t->dp[7] = h;
             t->used = 8;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -5125,12 +5126,13 @@ int sp_mod(sp_int* a, sp_int* m, sp_int* r)
             t->dp[9] = l;
             l = h;
             h = o;
+            o = 0;
             SP_ASM_MUL_ADD_NO(l, h, a->dp[5], b->dp[5]);
             t->dp[10] = l;
             t->dp[11] = h;
             t->used = 12;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -5298,7 +5300,7 @@ int sp_mod(sp_int* a, sp_int* m, sp_int* r)
             t->dp[15] = h;
             t->used = 16;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -5578,7 +5580,7 @@ int sp_mod(sp_int* a, sp_int* m, sp_int* r)
             t->dp[23] = h;
             t->used = 24;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -6004,7 +6006,7 @@ int sp_mod(sp_int* a, sp_int* m, sp_int* r)
             t->dp[31] = h;
             t->used = 32;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -6811,7 +6813,7 @@ int sp_mod(sp_int* a, sp_int* m, sp_int* r)
             t->dp[47] = h;
             t->used = 48;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -9240,7 +9242,7 @@ int sp_div_2d(sp_int* a, int e, sp_int* r, sp_int* rem)
                 rem->used = (e + SP_WORD_SIZE - 1) >> SP_WORD_SHIFT;
                 e &= SP_WORD_MASK;
                 if (e > 0) {
-                    rem->dp[rem->used - 1] &= (1 << e) - 1;
+                    rem->dp[rem->used - 1] &= ((sp_int_digit)1 << e) - 1;
                 }
                 sp_clamp(rem);
             }
@@ -9693,12 +9695,13 @@ int sp_mul_2d(sp_int* a, int e, sp_int* r)
             t->dp[5] = l;
             l = h;
             h = o;
+            o = 0;
             SP_ASM_SQR_ADD_NO(l, h, a->dp[3]);
             t->dp[6] = l;
             t->dp[7] = h;
             t->used = 8;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -9808,12 +9811,13 @@ int sp_mul_2d(sp_int* a, int e, sp_int* r)
             t->dp[9] = l;
             l = h;
             h = o;
+            o = 0;
             SP_ASM_SQR_ADD_NO(l, h, a->dp[5]);
             t->dp[10] = l;
             t->dp[11] = h;
             t->used = 12;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -9964,7 +9968,7 @@ int sp_mul_2d(sp_int* a, int e, sp_int* r)
             t->dp[15] = h;
             t->used = 16;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -10197,7 +10201,7 @@ int sp_mul_2d(sp_int* a, int e, sp_int* r)
             t->dp[23] = h;
             t->used = 24;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -10530,7 +10534,7 @@ int sp_mul_2d(sp_int* a, int e, sp_int* r)
             t->dp[31] = h;
             t->used = 32;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -11104,7 +11108,7 @@ int sp_mul_2d(sp_int* a, int e, sp_int* r)
             t->dp[47] = h;
             t->used = 48;
             sp_copy(t, r);
-            sp_clamp(t);
+            sp_clamp(r);
         }
 
     #ifdef WOLFSSL_SMALL_STACK
@@ -12711,14 +12715,24 @@ int sp_tohex(sp_int* a, char* str)
             i = a->used - 1;
     #ifndef WC_DISABLE_RADIX_ZERO_PAD
             for (j = SP_WORD_SIZE - 8; j >= 0; j -= 8) {
-                if (((a->dp[i] >> j) & 0xff) != 0)
+                if (((a->dp[i] >> j) & 0xff) != 0) {
                     break;
+                }
+                else if (j == 0) {
+                    j = SP_WORD_SIZE - 8;
+                    --i;
+                }
             }
             j += 4;
     #else
             for (j = SP_WORD_SIZE - 4; j >= 0; j -= 4) {
-                if (((a->dp[i] >> j) & 0xf) != 0)
+                if (((a->dp[i] >> j) & 0xf) != 0) {
                     break;
+                }
+                else if (j == 0) {
+                    j = SP_WORD_SIZE - 4;
+                    --i;
+                }
             }
     #endif /* WC_DISABLE_RADIX_ZERO_PAD */
             for (; j >= 0; j -= 4) {
@@ -12970,26 +12984,27 @@ int sp_radix_size(sp_int* a, int radix, int* size)
 int sp_rand_prime(sp_int* r, int len, WC_RNG* rng, void* heap)
 {
     static const int USE_BBS = 1;
-    int   err = MP_OKAY, type;
+    int   err = MP_OKAY;
+    int   type = 0;
     int   isPrime = MP_NO;
 #ifdef WOLFSSL_SP_MATH_ALL
-    int   bits;
+    int   bits = 0;
 #endif /* WOLFSSL_SP_MATH_ALL */
 
     (void)heap;
 
-    if ((r == NULL) || (rng == NULL)) {
+    if ((r == NULL) || (rng == NULL) || len < 0 ) {
         err = MP_VAL;
     }
+
+    if (len == 0)
+        return MP_OKAY;
 
     if (err == MP_OKAY) {
         /* get type */
         if (len < 0) {
             type = USE_BBS;
             len = -len;
-        }
-        else {
-            type = 0;
         }
 
     #ifndef WOLFSSL_SP_MATH_ALL
