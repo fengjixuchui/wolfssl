@@ -11215,6 +11215,27 @@ WOLFSSL_API int wolfSSL_CTX_set_TicketHint(WOLFSSL_CTX* ctx, int);
 WOLFSSL_API int wolfSSL_CTX_set_TicketEncCtx(WOLFSSL_CTX* ctx, void*);
 
 /*!
+    \brief This function gets the session ticket encrypt user context for the
+    callback.  For server side use.
+
+    \return userCtx will be returned upon successfully getting the session.
+    \return NULL will be returned on failure.  This is caused by
+    passing invalid arguments to the function, or when the user context has
+    not been set.
+
+    \param ctx pointer to the WOLFSSL_CTX object, created
+    with wolfSSL_CTX_new().
+
+    _Example_
+    \code
+    none
+    \endcode
+
+    \sa wolfSSL_CTX_set_TicketEncCtx
+*/
+WOLFSSL_API void* wolfSSL_CTX_get_TicketEncCtx(WOLFSSL_CTX* ctx);
+
+/*!
     \ingroup IO
 
     \brief Checks if QSH is used in the supplied SSL session.
@@ -12721,6 +12742,40 @@ WOLFSSL_API int  wolfSSL_no_dhe_psk(WOLFSSL* ssl);
     \sa wolfSSL_write
 */
 WOLFSSL_API int  wolfSSL_update_keys(WOLFSSL* ssl);
+
+/*!
+    \ingroup IO
+
+    \brief This function is called on a TLS v1.3 client or server wolfSSL to
+    determine whether a rollover of keys is in progress. When
+    wolfSSL_update_keys() is called, a KeyUpdate message is sent and the
+    encryption key is updated. The decryption key is updated when the response
+    is received.
+
+    \param [in] ssl a pointer to a WOLFSSL structure, created using wolfSSL_new().
+    \param [out] required   0 when no key update response required. 1 when no key update response required.
+
+    \return 0 on successful.
+    \return BAD_FUNC_ARG if ssl is NULL or not using TLS v1.3.
+
+    _Example_
+    \code
+    int ret;
+    WOLFSSL* ssl;
+    int required;
+    ...
+    ret = wolfSSL_key_update_response(ssl, &required);
+    if (ret != 0) {
+        // bad parameters
+    }
+    if (required) {
+        // encrypt Key updated, awaiting response to change decrypt key
+    }
+    \endcode
+
+    \sa wolfSSL_update_keys
+*/
+WOLFSSL_API int  wolfSSL_key_update_response(WOLFSSL* ssl, int* required);
 
 /*!
     \ingroup Setup

@@ -1748,6 +1748,26 @@ static void test_wolfSSL_CTX_enable_disable(void)
     wolfSSL_CTX_free(ctx);
 #endif /* NO_CERTS */
 }
+
+static void test_wolfSSL_CTX_ticket_API(void)
+{
+#if defined(HAVE_SESSION_TICKET) && !defined(NO_WOLFSSL_SERVER)
+    WOLFSSL_CTX* ctx = NULL;
+    void *userCtx = (void*)"this is my ctx";
+
+    AssertNotNull(ctx = wolfSSL_CTX_new(wolfSSLv23_server_method()));
+
+    AssertIntEQ(WOLFSSL_SUCCESS, wolfSSL_CTX_set_TicketEncCtx(ctx, userCtx));
+    AssertTrue(userCtx == wolfSSL_CTX_get_TicketEncCtx(ctx));
+
+    wolfSSL_CTX_free(ctx);
+
+    AssertIntNE(WOLFSSL_SUCCESS, wolfSSL_CTX_set_TicketEncCtx(NULL, userCtx));
+    AssertNull(wolfSSL_CTX_get_TicketEncCtx(NULL));
+#endif /* HAVE_SESSION_TICKET && !NO_WOLFSSL_SERVER */
+}
+
+
 /*----------------------------------------------------------------------------*
  | SSL
  *----------------------------------------------------------------------------*/
@@ -30221,6 +30241,57 @@ static void test_wolfSSL_PKCS8_d2i(void)
 #endif /* HAVE_FIPS */
 }
 
+#if defined(ERROR_QUEUE_PER_THREAD) && !defined(NO_ERROR_QUEUE) && \
+    defined(OPENSSL_EXTRA) && defined(DEBUG_WOLFSSL)
+#define LOGGING_THREADS 5
+#define ERROR_COUNT 10
+static volatile int loggingThreadsReady;
+static THREAD_RETURN WOLFSSL_THREAD test_logging(void* args)
+{
+    const char* file;
+    int line;
+    int err;
+    int errorCount = 0;
+    int i;
+
+    (void)args;
+
+    while (!loggingThreadsReady);
+    for (i = 0; i < ERROR_COUNT; i++)
+        ERR_put_error(ERR_LIB_PEM, SYS_F_ACCEPT, -990 - i, __FILE__, __LINE__);
+
+    while ((err = ERR_get_error_line(&file, &line))) {
+        AssertIntEQ(err, 990 + errorCount);
+        errorCount++;
+    }
+    AssertIntEQ(errorCount, ERROR_COUNT);
+
+    return 0;
+}
+#endif
+
+static void test_error_queue_per_thread(void)
+{
+#if defined(ERROR_QUEUE_PER_THREAD) && !defined(NO_ERROR_QUEUE) && \
+    defined(OPENSSL_EXTRA) && defined(DEBUG_WOLFSSL)
+    THREAD_TYPE loggingThreads[LOGGING_THREADS];
+    int i;
+
+    printf(testingFmt, "error_queue_per_thread()");
+
+    ERR_clear_error(); /* clear out any error nodes */
+
+    loggingThreadsReady = 0;
+    for (i = 0; i < LOGGING_THREADS; i++)
+        start_thread(test_logging, NULL, &loggingThreads[i]);
+    loggingThreadsReady = 1;
+    for (i = 0; i < LOGGING_THREADS; i++)
+        join_thread(loggingThreads[i]);
+
+    printf(resultFmt, passed);
+#endif
+}
+
 static void test_wolfSSL_ERR_put_error(void)
 {
     #if !defined(NO_ERROR_QUEUE) && defined(OPENSSL_EXTRA) && \
@@ -37419,6 +37490,7 @@ static int test_tls13_apis(void)
     const char*  ourKey  = svrKeyFile;
 #endif
 #endif
+    int          required;
 #ifdef WOLFSSL_EARLY_DATA
     int          outSz;
 #endif
@@ -37606,6 +37678,19 @@ static int test_tls13_apis(void)
 #endif
 #ifndef NO_WOLFSSL_SERVER
     AssertIntEQ(wolfSSL_update_keys(serverSsl), BUILD_MSG_ERROR);
+#endif
+
+    AssertIntEQ(wolfSSL_key_update_response(NULL, NULL), BAD_FUNC_ARG);
+    AssertIntEQ(wolfSSL_key_update_response(NULL, &required), BAD_FUNC_ARG);
+#ifndef NO_WOLFSSL_CLIENT
+#ifndef WOLFSSL_NO_TLS12
+    AssertIntEQ(wolfSSL_key_update_response(clientTls12Ssl, &required),
+                BAD_FUNC_ARG);
+#endif
+    AssertIntEQ(wolfSSL_key_update_response(clientSsl, NULL), BAD_FUNC_ARG);
+#endif
+#ifndef NO_WOLFSSL_SERVER
+    AssertIntEQ(wolfSSL_key_update_response(serverSsl, NULL), BAD_FUNC_ARG);
 #endif
 
 #if !defined(NO_CERTS) && defined(WOLFSSL_POST_HANDSHAKE_AUTH)
@@ -40289,6 +40374,7 @@ void ApiTest(void)
     test_wolfSSL_CTX_SetMinMaxDhKey_Sz();
     test_wolfSSL_CTX_der_load_verify_locations();
     test_wolfSSL_CTX_enable_disable();
+    test_wolfSSL_CTX_ticket_API();
     test_server_wolfSSL_new();
     test_client_wolfSSL_new();
     test_wolfSSL_SetTmpDH_file();
@@ -40435,6 +40521,7 @@ void ApiTest(void)
     test_wolfSSL_pseudo_rand();
     test_wolfSSL_PKCS8_Compat();
     test_wolfSSL_PKCS8_d2i();
+    test_error_queue_per_thread();
     test_wolfSSL_ERR_put_error();
 #ifndef NO_BIO
     test_wolfSSL_ERR_print_errors();

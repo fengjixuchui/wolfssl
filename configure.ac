@@ -7,20 +7,36 @@
 #
 AC_COPYRIGHT([Copyright (C) 2006-2020 wolfSSL Inc.])
 AC_PREREQ([2.63])
-AC_INIT([wolfssl],[4.6.0],[https://github.com/wolfssl/wolfssl/issues],[wolfssl],[https://www.wolfssl.com])
+AC_INIT([wolfssl],[4.7.1],[https://github.com/wolfssl/wolfssl/issues],[wolfssl],[https://www.wolfssl.com])
 AC_CONFIG_AUX_DIR([build-aux])
 
 # The following sets CFLAGS to empty if unset on command line.  We do not
 # want the default "-g -O2" that AC_PROG_CC sets automatically.
 : ${CFLAGS=""}
 
-# For reproducible builds, gate out from the build anything that might
+# Distro build feature subset (Debian, Ubuntu, etc.)
+AC_ARG_ENABLE([distro],
+    [AS_HELP_STRING([--enable-distro],[Enable wolfSSL distro build (default: disabled)])],
+    [ ENABLED_DISTRO=$enableval ],
+    [ ENABLED_DISTRO=no ]
+    )
+if test "$ENABLED_DISTRO" = "yes"
+then
+    enable_shared=yes
+    enable_static=yes
+    enable_all=yes
+    REPRODUCIBLE_BUILD_DEFAULT=yes
+else
+    REPRODUCIBLE_BUILD_DEFAULT=no
+fi
+
+# For reproducible build, gate out from the build anything that might
 # introduce semantically frivolous jitter, maximizing chance of
 # identical object files.
 AC_ARG_ENABLE([reproducible-build],
-    [AS_HELP_STRING([--enable-reproducible-builds],[Enable maximally reproducible build (default: disabled)])],
+    [AS_HELP_STRING([--enable-reproducible-build],[Enable maximally reproducible build (default: disabled)])],
     [ ENABLED_REPRODUCIBLE_BUILD=$enableval ],
-    [ ENABLED_REPRODUCIBLE_BUILD=no ]
+    [ ENABLED_REPRODUCIBLE_BUILD=$REPRODUCIBLE_BUILD_DEFAULT ]
     )
 
 # Test ar for the "U" or "D" options. Should be checked before the libtool macros.
@@ -55,7 +71,7 @@ LT_PREREQ([2.2])
 LT_INIT([disable-static win32-dll])
 
 #shared library versioning
-WOLFSSL_LIBRARY_VERSION=27:0:3
+WOLFSSL_LIBRARY_VERSION=28:1:4
 #                        | | |
 #                 +------+ | +---+
 #                 |        |     |
@@ -201,20 +217,6 @@ v1) if ! test -s ctaocrypt/src/fips.c; then
    fi
    ;;
 esac
-
-
-# Distro build feature subset (Debian, Ubuntu, etc.)
-AC_ARG_ENABLE([distro],
-    [AS_HELP_STRING([--enable-distro],[Enable wolfSSL distro build (default: disabled)])],
-    [ ENABLED_DISTRO=$enableval ],
-    [ ENABLED_DISTRO=no ]
-    )
-if test "$ENABLED_DISTRO" = "yes"
-then
-    enable_shared=yes
-    enable_static=yes
-    enable_all=yes
-fi
 
 
 # Linux Kernel Module
@@ -938,6 +940,18 @@ then
   AM_CFLAGS="-DWOLFSSL_EKU_OID -DWOLFSSL_MULTI_ATTRIB $AM_CFLAGS"
 fi
 
+# One Error Queue per Thread
+AC_ARG_ENABLE([error-queue-per-thread],
+[AS_HELP_STRING([--enable-error-queue-per-thread],[Enable one error queue per thread. Requires thread local storage. (default: disabled)])],
+[ ENABLED_ERRORQUEUEPERTHREAD=$enableval ],
+[ ENABLED_ERRORQUEUEPERTHREAD=no ]
+)
+
+if test "$ENABLED_ERRORQUEUEPERTHREAD" = "yes"
+then
+  AM_CFLAGS="-DERROR_QUEUE_PER_THREAD $AM_CFLAGS"
+fi
+
 # High Strength Build
 AC_ARG_ENABLE([maxstrength],
     [AS_HELP_STRING([--enable-maxstrength],[Enable Max Strength build, allows TLSv1.2-AEAD-PFS ciphers only (default: disabled)])],
@@ -1657,6 +1671,59 @@ then
 fi
 
 
+# set sha224 default
+SHA224_DEFAULT=no
+if test "$host_cpu" = "x86_64" || test "$host_cpu" = "aarch64"
+then
+    if test "x$ENABLED_AFALG" = "xno" && test "x$ENABLED_DEVCRYPTO" = "xno" && ( test "x$ENABLED_FIPS" = "xno" || test "x$FIPS_VERSION" = "xv2" )
+    then
+        SHA224_DEFAULT=yes
+    fi
+fi
+
+# SHA224
+AC_ARG_ENABLE([sha224],
+    [AS_HELP_STRING([--enable-sha224],[Enable wolfSSL SHA-224 support (default: enabled on x86_64/aarch64)])],
+    [ ENABLED_SHA224=$enableval ],
+    [ ENABLED_SHA224=$SHA224_DEFAULT ]
+    )
+
+if test "$ENABLED_SHA224" = "yes"
+then
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_SHA224"
+fi
+
+
+# set sha3 default
+SHA3_DEFAULT=no
+if test "$host_cpu" = "x86_64" || test "$host_cpu" = "aarch64"
+then
+    if test "x$ENABLED_FIPS" = "xno" || test "x$FIPS_VERSION" = "xv2"
+    then
+        SHA3_DEFAULT=yes
+    fi
+fi
+
+# SHA3
+AC_ARG_ENABLE([sha3],
+    [AS_HELP_STRING([--enable-sha3],[Enable wolfSSL SHA-3 support (default: enabled on x86_64/aarch64)])],
+    [ ENABLED_SHA3=$enableval ],
+    [ ENABLED_SHA3=$SHA3_DEFAULT ]
+    )
+
+if test "$ENABLED_SHA3" = "small"
+then
+    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_SHA3_SMALL"
+    ENABLED_SHA3="yes"
+fi
+
+# SHAKE256
+AC_ARG_ENABLE([shake256],
+    [AS_HELP_STRING([--enable-shake256],[Enable wolfSSL SHAKE256 support (default: enabled on x86_64/aarch64)])],
+    [ ENABLED_SHAKE256=$enableval ],
+    [ ENABLED_SHAKE256=$ENABLED_SHA3 ]
+    )
+
 # SHA512
 AC_ARG_ENABLE([sha512],
     [AS_HELP_STRING([--enable-sha512],[Enable wolfSSL SHA-512 support (default: enabled)])],
@@ -2090,7 +2157,7 @@ then
     AM_CFLAGS="$AM_CFLAGS -DHAVE_ED448"
 
     # EdDSA448 requires SHAKE256 which requires SHA-3
-    ENABLED_SHAKE3=yes
+    ENABLED_SHA3=yes
     ENABLED_SHAKE256=yes
 
     ENABLED_CERTS=yes
@@ -2954,63 +3021,22 @@ AS_CASE([$SELFTEST_VERSION],
     ])
 
 
-# set sha224 default
-SHA224_DEFAULT=no
-if test "$host_cpu" = "x86_64" || test "$host_cpu" = "aarch64"
+
+# set POLY1305 default
+POLY1305_DEFAULT=yes
+
+if test "x$ENABLED_FIPS" = "xyes"
 then
-    if test "x$ENABLED_AFALG" = "xno" && test "x$ENABLED_DEVCRYPTO" = "xno" && ( test "x$ENABLED_FIPS" = "xno" || test "x$FIPS_VERSION" = "xv2" )
-    then
-        SHA224_DEFAULT=yes
-    fi
+POLY1305_DEFAULT=no
 fi
 
-# SHA224
-AC_ARG_ENABLE([sha224],
-    [AS_HELP_STRING([--enable-sha224],[Enable wolfSSL SHA-224 support (default: enabled on x86_64/aarch64)])],
-    [ ENABLED_SHA224=$enableval ],
-    [ ENABLED_SHA224=$SHA224_DEFAULT ]
-    )
-
-if test "$ENABLED_SHA224" = "yes"
-then
-    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_SHA224"
-fi
-
-
-# set sha3 default
-SHA3_DEFAULT=no
-if test "$host_cpu" = "x86_64" || test "$host_cpu" = "aarch64"
-then
-    if test "x$ENABLED_FIPS" = "xno" || test "x$FIPS_VERSION" = "xv2"
-    then
-        SHA3_DEFAULT=yes
-    fi
-fi
-
-# SHA3
-AC_ARG_ENABLE([sha3],
-    [AS_HELP_STRING([--enable-sha3],[Enable wolfSSL SHA-3 support (default: enabled on x86_64/aarch64)])],
-    [ ENABLED_SHA3=$enableval ],
-    [ ENABLED_SHA3=$SHA3_DEFAULT ]
-    )
-
-if test "$ENABLED_SHA3" = "small"
-then
-    AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_SHA3_SMALL"
-    ENABLED_SHA3="yes"
-fi
+# Set SHA-3 and SHAKE256 flags
 
 if test "$ENABLED_SHA3" = "yes" && test "$ENABLED_32BIT" = "no"
 then
     AM_CFLAGS="$AM_CFLAGS -DWOLFSSL_SHA3"
 fi
 
-# SHAKE256
-AC_ARG_ENABLE([shake256],
-    [AS_HELP_STRING([--enable-shake256],[Enable wolfSSL SHAKE256 support (default: enabled on x86_64/aarch64)])],
-    [ ENABLED_SHAKE256=$enableval ],
-    [ ENABLED_SHAKE256=$ENABLED_SHA3 ]
-    )
 
 if test "$ENABLED_SHAKE256" = "yes" || test "$ENABLED_SHAKE256" = "small"
 then
@@ -3024,13 +3050,6 @@ then
     fi
 fi
 
-# set POLY1305 default
-POLY1305_DEFAULT=yes
-
-if test "x$ENABLED_FIPS" = "xyes"
-then
-POLY1305_DEFAULT=no
-fi
 
 # POLY1305
 AC_ARG_ENABLE([poly1305],

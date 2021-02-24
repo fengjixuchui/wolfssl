@@ -5323,6 +5323,7 @@ int SetSSL_CTX(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup)
     ssl->options.mask = ctx->mask;
 #endif
 #ifdef OPENSSL_EXTRA
+    #ifdef WOLFSSL_TLS13
     if (ssl->version.minor == TLSv1_3_MINOR &&
      (ssl->options.mask & SSL_OP_NO_TLSv1_3) == SSL_OP_NO_TLSv1_3) {
         if (!ctx->method->downgrade) {
@@ -5333,6 +5334,7 @@ int SetSSL_CTX(WOLFSSL* ssl, WOLFSSL_CTX* ctx, int writeDup)
         WOLFSSL_MSG("\tOption set to not allow TLSv1.3, Downgrading");
         ssl->version.minor = TLSv1_2_MINOR;
     }
+    #endif
     if (ssl->version.minor == TLSv1_2_MINOR &&
      (ssl->options.mask & SSL_OP_NO_TLSv1_2) == SSL_OP_NO_TLSv1_2) {
         if (!ctx->method->downgrade) {
@@ -11369,8 +11371,8 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                     if (ssl->options.side == WOLFSSL_CLIENT_END) {
                 #ifdef HAVE_CERTIFICATE_STATUS_REQUEST
                         if (ssl->status_request) {
-                            args->fatal = TLSX_CSR_InitRequest(ssl->extensions,
-                                                    args->dCert, ssl->heap);
+                            args->fatal = (TLSX_CSR_InitRequest(ssl->extensions,
+                                                args->dCert, ssl->heap) != 0);
                             doLookup = 0;
                         #if defined(WOLFSSL_TLS13)
                             if (ssl->options.tls1_3) {
@@ -11397,8 +11399,8 @@ int ProcessPeerCerts(WOLFSSL* ssl, byte* input, word32* inOutIdx,
                 #endif /* HAVE_CERTIFICATE_STATUS_REQUEST */
                 #ifdef HAVE_CERTIFICATE_STATUS_REQUEST_V2
                         if (ssl->status_request_v2) {
-                            args->fatal = TLSX_CSR2_InitRequests(ssl->extensions,
-                                                    args->dCert, 1, ssl->heap);
+                            args->fatal = (TLSX_CSR2_InitRequests(ssl->extensions,
+                                                 args->dCert, 1, ssl->heap) != 0);
                             doLookup = 0;
                         }
                 #endif /* HAVE_CERTIFICATE_STATUS_REQUEST_V2 */
@@ -18954,7 +18956,8 @@ void SetErrorString(int error, char* str)
      */
 
     #ifndef NO_ERROR_STRINGS
-        #if defined(OPENSSL_ALL) || defined(WOLFSSL_QT)
+        #if defined(OPENSSL_ALL) || defined(WOLFSSL_QT) || \
+            defined(WOLFSSL_HAPROXY) || defined(WOLFSSL_NGINX)
             #define SUITE_INFO(x,y,z,w,v,u) {(x),(y),(z),(w),(v),(u),WOLFSSL_CIPHER_SUITE_FLAG_NONE}
             #define SUITE_ALIAS(x,z,w,v,u) {(x),"",(z),(w),(v),(u),WOLFSSL_CIPHER_SUITE_FLAG_NAMEALIAS},
         #else
@@ -18962,7 +18965,8 @@ void SetErrorString(int error, char* str)
             #define SUITE_ALIAS(x,z,w,v,u) {(x),"",(z),(w),WOLFSSL_CIPHER_SUITE_FLAG_NAMEALIAS},
         #endif
     #else
-        #if defined(OPENSSL_ALL) || defined(WOLFSSL_QT)
+        #if defined(OPENSSL_ALL) || defined(WOLFSSL_QT) || \
+            defined(WOLFSSL_HAPROXY) || defined(WOLFSSL_NGINX)
             #define SUITE_INFO(x,y,z,w,v,u) {(x),(z),(w),(v),(u),WOLFSSL_CIPHER_SUITE_FLAG_NONE}
             #define SUITE_ALIAS(x,z,w,v,u) {(x),(z),(w),(v),(u),WOLFSSL_CIPHER_SUITE_FLAG_NAMEALIAS},
         #else
@@ -19951,6 +19955,7 @@ static byte MinHashAlgo(WOLFSSL* ssl)
         return sha256_mac;
     }
 #endif /* WOLFSSL_NO_TLS12 */
+    (void)ssl;
     return sha_mac;
 }
 

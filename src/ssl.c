@@ -2893,6 +2893,14 @@ int wolfSSL_CTX_set_TicketEncCtx(WOLFSSL_CTX* ctx, void* userCtx)
     return WOLFSSL_SUCCESS;
 }
 
+/* get user context - returns userCtx on success, NULL on failure */
+void* wolfSSL_CTX_get_TicketEncCtx(WOLFSSL_CTX* ctx)
+{
+    if (ctx == NULL)
+        return NULL;
+
+    return ctx->ticketEncCtx;
+}
 #endif /* !NO_WOLFSSL_SERVER */
 
 #if !defined(NO_WOLFSSL_CLIENT)
@@ -16007,15 +16015,18 @@ int wolfSSL_set_compression(WOLFSSL* ssl)
 
     long wolfSSL_BIO_set_ssl(WOLFSSL_BIO* b, WOLFSSL* ssl, int closeF)
     {
+        long ret = WOLFSSL_FAILURE;
+
         WOLFSSL_ENTER("wolfSSL_BIO_set_ssl");
 
         if (b != NULL) {
             b->ptr   = ssl;
             b->shutdown = (byte)closeF;
     /* add to ssl for bio free if SSL_free called before/instead of free_all? */
+            ret = WOLFSSL_SUCCESS;
         }
 
-        return 0;
+        return ret;
     }
 
 #ifndef NO_FILESYSTEM
@@ -26431,6 +26442,14 @@ WOLFSSL_ASN1_INTEGER* wolfSSL_X509_get_serialNumber(WOLFSSL_X509* x509)
 
     WOLFSSL_ENTER("wolfSSL_X509_get_serialNumber");
 
+    if (x509 == NULL) {
+        WOLFSSL_MSG("NULL function argument");
+        return NULL;
+    }
+
+    if (x509->serialNumber != NULL)
+       return x509->serialNumber;
+
     a = wolfSSL_ASN1_INTEGER_new();
     if (a == NULL)
         return NULL;
@@ -27682,8 +27701,7 @@ long wolfSSL_set_tlsext_status_type(WOLFSSL *s, int type)
     }
 
     if (type == TLSEXT_STATUSTYPE_ocsp){
-        int r = 0;
-        r = TLSX_UseCertificateStatusRequest(&s->extensions, type, 0, s,
+        int r = TLSX_UseCertificateStatusRequest(&s->extensions, (byte)type, 0, s,
                                                              s->heap, s->devId);
         return (long)r;
     } else {
@@ -45557,6 +45575,9 @@ int wolfSSL_X509_NAME_print_ex(WOLFSSL_BIO* bio, WOLFSSL_X509_NAME* name,
             return WOLFSSL_FAILURE;
     }
 
+    if ((name == NULL) || (name->sz == 0))
+        return WOLFSSL_FAILURE;
+
 #if defined(WOLFSSL_APACHE_HTTPD) || defined(OPENSSL_ALL) || defined(WOLFSSL_NGINX)
     /* If XN_FLAG_DN_REV is present, print X509_NAME in reverse order */
     if (flags == (XN_FLAG_RFC2253 & ~XN_FLAG_DN_REV)) {
@@ -45599,14 +45620,17 @@ int wolfSSL_X509_NAME_print_ex(WOLFSSL_BIO* bio, WOLFSSL_X509_NAME* name,
     }
 #else
     if (flags == XN_FLAG_RFC2253) {
-        if (wolfSSL_BIO_write(bio, name->name + 1, name->sz - 2)
-                                                                != name->sz - 2)
+        if ((name->sz < 3) ||
+            (wolfSSL_BIO_write(bio, name->name + 1, name->sz - 2)
+                                                            != name->sz - 2))
             return WOLFSSL_FAILURE;
     }
 #endif /* WOLFSSL_APACHE_HTTPD || OPENSSL_ALL || WOLFSSL_NGINX */
-    else if (wolfSSL_BIO_write(bio, name->name, name->sz - 1) != name->sz - 1)
+    else {
+        if ((name->sz < 2) ||
+            (wolfSSL_BIO_write(bio, name->name, name->sz - 1) != name->sz - 1))
         return WOLFSSL_FAILURE;
-
+    }
     return WOLFSSL_SUCCESS;
 }
 #endif /* !NO_BIO */
@@ -47804,7 +47828,8 @@ int wolfSSL_get_ocsp_producedDate_tm(WOLFSSL *ssl, struct tm *produced_tm) {
     if (produced_tm == NULL)
         return BAD_FUNC_ARG;
 
-    if (ExtractDate(ssl->ocspProducedDate, ssl->ocspProducedDateFormat, produced_tm, &idx))
+    if (ExtractDate(ssl->ocspProducedDate,
+            (unsigned char)ssl->ocspProducedDateFormat, produced_tm, &idx))
         return 0;
     else
         return ASN_PARSE_E;

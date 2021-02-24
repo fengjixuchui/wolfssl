@@ -6243,17 +6243,19 @@ WOLFSSL_TEST_SUBROUTINE int des_test(void)
         if (ret != BAD_FUNC_ARG)
             return -5008;
 
-        /* Test invalid hash type */
+    #ifndef NO_PWDBASED
+        /* Test invalid hash type - only applies to wc_PBKDF1 call */
         ret = wc_BufferKeyEncrypt(&info, cipher, sizeof(cipher), key,
                 sizeof(key), WC_HASH_TYPE_NONE);
         if (ret == 0)
             return -5009;
+    #endif /* !NO_PWDBASED */
     }
 #endif
 
     return 0;
 }
-#endif /* NO_DES3 */
+#endif /* !NO_DES3 */
 
 
 #ifndef NO_DES3
@@ -6375,7 +6377,7 @@ WOLFSSL_TEST_SUBROUTINE int des3_test(void)
 
     return 0;
 }
-#endif /* NO_DES */
+#endif /* NO_DES3 */
 
 
 #ifndef NO_AES
@@ -11821,12 +11823,15 @@ byte GetEntropy(ENTROPY_CMD cmd, byte* out)
         static const char* certEccRsaPemFile = CERT_WRITE_TEMP_DIR "certeccrsa.pem";
         static const char* certEccRsaDerFile = CERT_WRITE_TEMP_DIR "certeccrsa.der";
     #endif
+    #if defined(HAVE_ECC_KEY_EXPORT)
         static const char* eccCaKeyPemFile  = CERT_WRITE_TEMP_DIR "ecc-key.pem";
         static const char* eccPubKeyDerFile = CERT_WRITE_TEMP_DIR "ecc-public-key.der";
         static const char* eccCaKeyTempFile = CERT_WRITE_TEMP_DIR "ecc-key.der";
+
     #ifdef HAVE_PKCS8
         static const char* eccPkcs8KeyDerFile = CERT_WRITE_TEMP_DIR "ecc-key-pkcs8.der";
     #endif
+    #endif /* HAVE_ECC_KEY_EXPORT */
     #if defined(WOLFSSL_CERT_GEN) || \
             (defined(WOLFSSL_CERT_EXT) && defined(WOLFSSL_TEST_CERT))
         static const char* certEccDerFile = CERT_WRITE_TEMP_DIR "certecc.der";
@@ -12697,7 +12702,7 @@ static int rsa_sig_test(RsaKey* key, word32 keyLen, int modLen, WC_RNG* rng)
 #elif defined(HAVE_FIPS) || !defined(WC_RSA_BLINDING)
     /* FIPS140 implementation does not do blinding */
     if (ret != 0)
-#elif defined(WOLFSSL_RSA_PUBLIC_ONLY)
+#elif defined(WOLFSSL_RSA_PUBLIC_ONLY) || defined(WOLFSSL_RSA_VERIFY_ONLY)
     if (ret != SIG_TYPE_E)
 #elif defined(WOLFSSL_CRYPTOCELL)
     /* RNG is handled with the cryptocell */
@@ -12752,7 +12757,7 @@ static int rsa_sig_test(RsaKey* key, word32 keyLen, int modLen, WC_RNG* rng)
         return -7668;
 
     sigSz = (word32)ret;
-#ifndef WOLFSSL_RSA_PUBLIC_ONLY
+#if !defined(WOLFSSL_RSA_PUBLIC_ONLY) && !defined(WOLFSSL_RSA_VERIFY_ONLY)
     XMEMSET(out, 0, sizeof(out));
     ret = wc_SignatureGenerate(WC_HASH_TYPE_SHA256, WC_SIGNATURE_TYPE_RSA, in,
                                inLen, out, &sigSz, key, keyLen, rng);
@@ -12806,7 +12811,7 @@ static int rsa_sig_test(RsaKey* key, word32 keyLen, int modLen, WC_RNG* rng)
 #else
     (void)hash;
     (void)hashEnc;
-#endif /* WOLFSSL_RSA_PUBLIC_ONLY */
+#endif /* !WOLFSSL_RSA_PUBLIC_ONLY && !WOLFSSL_RSA_VERIFY_ONLY */
 
     return 0;
 }
@@ -13486,7 +13491,7 @@ exit_rsa_pss:
 
     return ret;
 }
-#endif /* WOLFSSL_RSA_VERIFY_ONLY */
+#endif /* !WOLFSSL_RSA_VERIFY_ONLY && !WOLFSSL_RSA_PUBLIC_ONLY */
 #endif
 
 #ifdef WC_RSA_NO_PADDING
@@ -13726,17 +13731,25 @@ static int rsa_even_mod_test(WC_RNG* rng, RsaKey* key)
     word32 idx     = 0;
 #endif
     word32 outSz   = RSA_TEST_BYTES;
+#ifndef WOLFSSL_RSA_PUBLIC_ONLY
     word32 plainSz = RSA_TEST_BYTES;
+#endif
 #if !defined(USE_CERT_BUFFERS_2048) && !defined(USE_CERT_BUFFERS_3072) && \
     !defined(USE_CERT_BUFFERS_4096) && !defined(NO_FILESYSTEM)
     XFILE  file;
 #endif
     DECLARE_VAR(out, byte, RSA_TEST_BYTES, HEAP_HINT);
+#ifndef WOLFSSL_RSA_PUBLIC_ONLY
     DECLARE_VAR(plain, byte, RSA_TEST_BYTES, HEAP_HINT);
-
+#endif
 #ifdef DECLARE_VAR_IS_HEAP_ALLOC
-    if (out == NULL || plain == NULL)
+    if (out == NULL
+    #ifndef WOLFSSL_RSA_PUBLIC_ONLY
+        || plain == NULL
+    #endif
+    ) {
         ERROR_OUT(MEMORY_E, exit_rsa_even_mod);
+    }
 #endif
 
 #if defined(USE_CERT_BUFFERS_2048)
@@ -13850,7 +13863,9 @@ static int rsa_even_mod_test(WC_RNG* rng, RsaKey* key)
 exit_rsa_even_mod:
     XFREE(tmp, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
     FREE_VAR(out, HEAP_HINT);
+#ifndef WOLFSSL_RSA_PUBLIC_ONLY
     FREE_VAR(plain, HEAP_HINT);
+#endif
 
     (void)out;
     (void)outSz;
@@ -14576,13 +14591,12 @@ WOLFSSL_TEST_SUBROUTINE int rsa_test(void)
     DECLARE_VAR(in, byte, TEST_STRING_SZ, HEAP_HINT);
     DECLARE_VAR(out, byte, RSA_TEST_BYTES, HEAP_HINT);
     DECLARE_VAR(plain, byte, RSA_TEST_BYTES, HEAP_HINT);
-#endif
 
 #ifdef DECLARE_VAR_IS_HEAP_ALLOC
     if (in == NULL || out == NULL || plain == NULL)
         ERROR_OUT(MEMORY_E, exit_rsa);
 #endif
-#ifndef WOLFSSL_RSA_VERIFY_ONLY
+
     XMEMCPY(in, inStr, inLen);
 #endif
 
@@ -15652,9 +15666,12 @@ exit_rsa:
     XFREE(tmp, HEAP_HINT, DYNAMIC_TYPE_TMP_BUFFER);
     wc_FreeRng(&rng);
 
+#if (!defined(WOLFSSL_RSA_VERIFY_ONLY) || defined(WOLFSSL_PUBLIC_MP)) && \
+                                 !defined(WC_NO_RSA_OAEP) && !defined(WC_NO_RNG)
     FREE_VAR(in, HEAP_HINT);
     FREE_VAR(out, HEAP_HINT);
     FREE_VAR(plain, HEAP_HINT);
+#endif
 
     /* ret can be greater then 0 with certgen but all negative values should
      * be returned and treated as an error */
@@ -20636,7 +20653,10 @@ static int ecc_test_make_pub(WC_RNG* rng)
     byte tmp[ECC_BUFSIZE];
 #endif
     const byte* msg = (const byte*)"test wolfSSL ECC public gen";
-    word32 x, tmpSz;
+#if defined(HAVE_ECC_KEY_EXPORT)
+    word32 x;
+#endif
+    word32 tmpSz;
     int ret = 0;
     ecc_point* pubPoint = NULL;
 #ifdef HAVE_ECC_VERIFY
@@ -21154,8 +21174,6 @@ static int ecc_test_curve_size(WC_RNG* rng, int keySize, int testVerifyCount,
 #endif
 
     ret = wc_ecc_make_key_ex(rng, keySize, userA, curve_id);
-    if (ret != 0)
-        ERROR_OUT(-9909, done);
 #if defined(WOLFSSL_ASYNC_CRYPT)
     ret = wc_AsyncWait(ret, &userA->asyncDev, WC_ASYNC_FLAG_NONE);
 #endif
@@ -21178,8 +21196,6 @@ static int ecc_test_curve_size(WC_RNG* rng, int keySize, int testVerifyCount,
 #if !defined(WOLFSSL_ATECC508A) && !defined(WOLFSSL_ATECC608A)
 
     ret = wc_ecc_make_key_ex(rng, keySize, userB, curve_id);
-    if (ret != 0)
-        ERROR_OUT(-9913, done);
 #if defined(WOLFSSL_ASYNC_CRYPT)
     ret = wc_AsyncWait(ret, &userB->asyncDev, WC_ASYNC_FLAG_NONE);
 #endif
@@ -27979,6 +27995,9 @@ static int pkcs7enveloped_run_vectors(byte* rsaCert, word32 rsaCertSz,
         if (ret != envelopedSz) {
             wc_PKCS7_Free(pkcs7);
             ERROR_OUT(-12192, out);
+        } else {
+            /* reset ret to 0 for success */
+            ret = 0;
         }
 #endif /* PKCS7_OUTPUT_TEST_BUNDLES */
 
@@ -28659,6 +28678,9 @@ static int pkcs7authenveloped_run_vectors(byte* rsaCert, word32 rsaCertSz,
         if (ret != envelopedSz) {
             wc_PKCS7_Free(pkcs7);
             ERROR_OUT(-12232, out);
+        } else {
+            /* reset ret to 0 for success */
+            ret = 0;
         }
 #endif /* PKCS7_OUTPUT_TEST_BUNDLES */
 
@@ -31699,8 +31721,7 @@ static int mp_test_param(mp_int* a, mp_int* b, mp_int* r, WC_RNG* rng)
         return -12827;
 #endif
 
-#if defined(WOLFSSL_SP_MATH_ALL) || defined(WOLFSSL_HAVE_SP_DH) || \
-    (defined(HAVE_ECC) && defined(FP_ECC))
+#if defined(WOLFSSL_SP_MATH_ALL) && !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
     ret = mp_gcd(NULL, NULL, NULL);
     if (ret != MP_VAL)
         return -12828;
@@ -31807,7 +31828,7 @@ static int mp_test_param(mp_int* a, mp_int* b, mp_int* r, WC_RNG* rng)
         return -12858;
 #endif
 
-#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
+#if defined(WOLFSSL_SP_MATH_ALL) && !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
     ret = mp_lcm(NULL, NULL, NULL);
     if (ret != MP_VAL)
         return -12859;
@@ -32636,23 +32657,20 @@ static int mp_test_prime(mp_int* a, WC_RNG* rng)
 }
 #endif
 
-#if defined(WOLFSSL_SP_MATH_ALL) || (defined(WOLFSSL_SP_MATH) && \
-    defined(WOLFSSL_HAVE_SP_DH) || (defined(HAVE_ECC) && defined(FP_ECC)))
+#if defined(WOLFSSL_KEY_GEN) && (!defined(WOLFSSL_SP_MATH_ALL) || \
+    !defined(NO_RSA))
 static int mp_test_lcm_gcd(mp_int* a, mp_int* b, mp_int* r, mp_int* exp,
                            WC_RNG* rng)
 {
     int ret;
-#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
     int i;
     WOLFSSL_SMALL_STACK_STATIC const int kat[][3] = {
       { 1, 1, 1 }, { 2, 1, 2 }, { 1, 2, 2 }, { 2, 4, 4 }, { 4, 2, 4 },
       { 12, 56, 168 }, { 56, 12, 168 }
     };
-#endif
 
     (void)exp;
 
-#if !defined(NO_RSA) && defined(WOLFSSL_KEY_GEN)
     mp_set(a, 0);
     mp_set(b, 1);
     ret = mp_lcm(a, a, r);
@@ -32675,7 +32693,6 @@ static int mp_test_lcm_gcd(mp_int* a, mp_int* b, mp_int* r, mp_int* exp,
         if (mp_cmp(r, exp) != MP_EQ)
             return -13094;
     }
-#endif
 
     (void)rng;
 #if defined(WOLFSSL_KEY_GEN) && (!defined(NO_DH) || !defined(NO_DSA)) && \
@@ -33372,8 +33389,8 @@ WOLFSSL_TEST_SUBROUTINE int mp_test(void)
     if ((ret = mp_test_prime(&a, &rng)) != 0)
         return ret;
 #endif
-#if defined(WOLFSSL_SP_MATH_ALL) || (defined(WOLFSSL_SP_MATH) && \
-    defined(WOLFSSL_HAVE_SP_DH) || (defined(HAVE_ECC) && defined(FP_ECC)))
+#if defined(WOLFSSL_KEY_GEN) && (!defined(WOLFSSL_SP_MATH_ALL) || \
+    !defined(NO_RSA))
     if ((ret = mp_test_lcm_gcd(&a, &b, &r1, &r2, &rng)) != 0)
         return ret;
 #endif

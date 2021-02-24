@@ -384,6 +384,7 @@ static int SetASNNull(byte* output)
     return 2;
 }
 
+#ifndef NO_CERTS
 /* Get the DER/BER encoding of an ASN.1 BOOLEAN.
  *
  * input     Buffer holding DER/BER encoded data.
@@ -413,7 +414,7 @@ static int GetBoolean(const byte* input, word32* inOutIdx, word32 maxIdx)
     *inOutIdx = idx;
     return b;
 }
-
+#endif /* !NO_CERTS*/
 #ifdef ASN1_SET_BOOLEAN
 /* Set the DER/BER encoding of the ASN.1 NULL element.
  * Note: Function not required as yet.
@@ -497,6 +498,7 @@ static int GetASNInt(const byte* input, word32* inOutIdx, int* len,
     return 0;
 }
 
+#ifndef NO_CERTS
 /* Get the DER/BER encoding of an ASN.1 INTEGER that has a value of no more than
  * 7 bits.
  *
@@ -526,7 +528,7 @@ static int GetInteger7Bit(const byte* input, word32* inOutIdx, word32 maxIdx)
     *inOutIdx = idx;
     return b;
 }
-
+#endif /* !NO_CERTS */
 
 #if !defined(NO_DSA) && !defined(NO_SHA)
 static const char sigSha1wDsaName[] = "SHAwDSA";
@@ -2771,7 +2773,7 @@ int ToTraditional(byte* input, word32 sz)
 
 #endif /* HAVE_PKCS8 || HAVE_PKCS12 */
 
-#ifdef HAVE_PKCS8
+#if defined(HAVE_PKCS8) && !defined(NO_CERTS)
 
 /* find beginning of traditional key inside PKCS#8 unencrypted buffer
  * return traditional length on success, with inOutIdx at beginning of
@@ -2865,7 +2867,6 @@ int wc_CreatePKCS8Key(byte* out, word32* outSz, byte* key, word32 keySz,
          *  no header information just INTEGER */
         sz = SetMyVersion(PKCS8v0, out + keyIdx, 0);
         tmpSz += sz; keyIdx += sz;
-
         /*  privateKeyAlgorithm PrivateKeyAlgorithmIdentifier */
         sz = 0; /* set sz to 0 and get privateKey oid buffer size needed */
         if (curveOID != NULL && oidSz > 0) {
@@ -2901,7 +2902,7 @@ int wc_CreatePKCS8Key(byte* out, word32* outSz, byte* key, word32 keySz,
         return tmpSz + sz;
 }
 
-#endif /* HAVE_PKCS8 */
+#endif /* HAVE_PKCS8 && !NO_CERTS */
 
 #if defined(HAVE_PKCS12) || !defined(NO_CHECK_PRIVATE_KEY)
 /* check that the private key is a pair for the public key
@@ -3148,6 +3149,7 @@ int wc_CheckPrivateKey(const byte* privKey, word32 privKeySz,
     {
         ret = 0;
     }
+    (void)ks;
 
     return ret;
 }
@@ -5655,6 +5657,9 @@ int CalcHashId(const byte* data, word32 len, byte* hash)
     ret = wc_ShaHash(data, len, hash);
 #else
     ret = NOT_COMPILED_IN;
+    (void)data;
+    (void)len;
+    (void)hash;
 #endif
 
     return ret;
@@ -6788,6 +6793,7 @@ int DecodeToKey(DecodedCert* cert, int verify)
     return ret;
 }
 
+#ifndef NO_CERTS
 static int GetSignature(DecodedCert* cert)
 {
     int length;
@@ -6807,6 +6813,7 @@ static int GetSignature(DecodedCert* cert)
 
     return 0;
 }
+#endif
 
 static word32 SetOctetString8Bit(word32 len, byte* output)
 {
